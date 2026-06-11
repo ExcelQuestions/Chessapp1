@@ -8,8 +8,12 @@ leak where the hidden pieces are). The client submits a move; the server is the
 sole authority that validates and applies it. That keeps the blindfold honest
 even if a player inspects the network traffic.
 
-Run:
-    python -m uvicorn server:app --reload --port 8000
+Run (development):
+    APP_PASSWORD=yourpassword uvicorn server:app --reload --port 8000
+    # or: create a .env file (see .env.example) and uvicorn picks it up
+
+Run (production via Render / Docker):
+    Set APP_PASSWORD (and optionally APP_SECRET) as environment variables.
 
 State is kept in memory (a dict of games). For real hosting you'd swap this for
 Redis/Postgres keyed by game id -- the per-game logic here is unchanged.
@@ -21,13 +25,22 @@ import os
 import secrets
 import sys
 import threading
+import time
 import uuid
+from collections import defaultdict
+
+# Load .env for local development; python-dotenv ships with uvicorn[standard].
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import chess
 import chess.engine
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from fastapi.staticfiles import StaticFiles
@@ -37,35 +50,43 @@ import blindfold_chess as bc  # reuse find_engine / format_move_list / build_pgn
 
 ENGINE_PATH = bc.find_engine()
 
+# Detect production: if the built SPA exists, FastAPI serves it from the same
+# origin and no CORS headers are needed.
+_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
+_PRODUCTION = os.path.isdir(_DIST)
 
 # --------------------------------------------------------------------------- #
 # Authentication: a single shared password gates the whole app.
 #
-# The password is read from APP_PASSWORD (falling back to a default so it works
-# out of the box). Logging in exchanges the password for a bearer token that
-# the client sends on every request. The token is a stateless HMAC, so it stays
-# valid across restarts and across multiple server instances without any shared
-# session store.
-#
-# NOTE: the default password below is committed to the repo, so for any real
-# deployment set APP_PASSWORD (and ideally APP_SECRET) to your own secrets.
+# APP_PASSWORD must be set as an environment variable — the server refuses to
+# start without it so a forgotten config never silently uses a weak default.
+# APP_SECRET can optionally be set to a fixed random string; if omitted it is
+# derived from the password (still secure, just not independent).
 # --------------------------------------------------------------------------- #
-APP_PASSWORD = os.environ.get("APP_PASSWORD", "adampaultom")
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+if not APP_PASSWORD:
+    sys.exit(
+        "\nERROR: APP_PASSWORD environment variable is not set.\n"
+        "Set it before starting the server, e.g.:\n"
+        "  APP_PASSWORD=mysecret uvicorn server:app --port 8000\n"
+        "Or add APP_PASSWORD=... to a .env file (see .env.example).\n"
+    )
+
 _SECRET = os.environ.get("APP_SECRET") or hashlib.sha256(
     ("blindfold:" + APP_PASSWORD).encode()
 ).hexdigest()
 _TOKEN = hmac.new(_SECRET.encode(), b"authenticated", hashlib.sha256).hexdigest()
 
 
-def _password_ok(candidate):
+def _password_ok(candidate: str) -> bool:
     return secrets.compare_digest(candidate or "", APP_PASSWORD)
 
 
-def _token_ok(candidate):
+def _token_ok(candidate: str) -> bool:
     return secrets.compare_digest(candidate or "", _TOKEN)
 
 
-def require_auth(authorization: str = Header(default=""), token: str = ""):
+def require_auth(authorization: str = Header(default=""), token: str = "") -> None:
     """Allow the request through only with a valid bearer token, supplied either
     in the Authorization header or as a ?token= query param (used by the PGN
     download link, which can't set headers)."""
@@ -74,17 +95,48 @@ def require_auth(authorization: str = Header(default=""), token: str = ""):
         return
     raise HTTPException(401, "Authentication required.")
 
-app = FastAPI(title="Blindfold Chess")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
-# game_id -> {board, human (chess colour), level, think_time, last_engine}
-_games = {}
+# --------------------------------------------------------------------------- #
+# Rate limiting: simple in-memory sliding window, sufficient for a small
+# number of users. Resets on server restart (acceptable trade-off).
+# --------------------------------------------------------------------------- #
+_login_attempts: dict = defaultdict(list)
+_RATE_WINDOW = 60   # seconds
+_RATE_LIMIT = 10    # max attempts per window per source IP
+
+
+def _check_rate_limit(request: Request) -> None:
+    ip = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    window_start = now - _RATE_WINDOW
+    recent = [t for t in _login_attempts[ip] if t > window_start]
+    _login_attempts[ip] = recent
+    if len(recent) >= _RATE_LIMIT:
+        raise HTTPException(429, "Too many login attempts. Try again later.")
+    _login_attempts[ip].append(now)
+
+
+# --------------------------------------------------------------------------- #
+# App
+# --------------------------------------------------------------------------- #
+# Disable the interactive docs endpoints — no need to expose the API schema.
+app = FastAPI(title="Blindfold Chess", docs_url=None, redoc_url=None)
+
+# CORS: in production the SPA is served from the same origin so no CORS headers
+# are needed. In dev (Vite on :5173, API on :8000) allow localhost only.
+if not _PRODUCTION:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173"],
+        allow_methods=["GET", "POST"],
+        allow_headers=["Authorization", "Content-Type"],
+    )
+
+# Games: capped to prevent unbounded memory growth. When the cap is reached the
+# oldest game is evicted — fine for a handful of concurrent users.
+_games: dict = {}
 _lock = threading.Lock()
+_MAX_GAMES = 50
 
 
 # --------------------------------------------------------------------------- #
@@ -94,15 +146,15 @@ class NewGame(BaseModel):
     level: int = Field(5, ge=0, le=20)
     colour: str = Field("white", pattern="^(white|black|random)$")
     think_time: float = Field(0.5, gt=0, le=5)
-    show: str = "p"  # which piece types are visible (subset of pnbrqk)
+    show: str = Field("p", max_length=6)
 
 
 class MoveIn(BaseModel):
-    move: str  # standard algebraic notation (Nf3, exd5, O-O, e8=Q) or coordinates
+    move: str = Field(..., min_length=2, max_length=10)
 
 
 class Login(BaseModel):
-    password: str
+    password: str = Field(..., max_length=200)
 
 
 # --------------------------------------------------------------------------- #
@@ -216,7 +268,8 @@ def health():
 
 
 @app.post("/api/login")
-def login(body: Login):
+def login(body: Login, request: Request):
+    _check_rate_limit(request)
     if not _password_ok(body.password):
         raise HTTPException(401, "Wrong password.")
     return {"token": _TOKEN}
@@ -235,6 +288,10 @@ def create_game(body: NewGame, _=Depends(require_auth)):
 
     game_id = uuid.uuid4().hex[:12]
     with _lock:
+        if len(_games) >= _MAX_GAMES:
+            # Evict the oldest game to keep memory bounded.
+            oldest = next(iter(_games))
+            del _games[oldest]
         _games[game_id] = {
             "board": chess.Board(),
             "human": human,
@@ -299,6 +356,5 @@ def get_pgn(game_id: str, _=Depends(require_auth)):
 # The SPA shell is public; the login screen lives inside it and every API call
 # it makes is gated by require_auth.
 # --------------------------------------------------------------------------- #
-_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
-if os.path.isdir(_DIST):
+if _PRODUCTION:
     app.mount("/", StaticFiles(directory=_DIST, html=True), name="static")

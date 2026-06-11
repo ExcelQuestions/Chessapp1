@@ -35,8 +35,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py blindfold_chess.py ./
 COPY --from=web /web/dist ./frontend/dist
 
-# Set your own secret password at deploy time:  -e APP_PASSWORD=...
-ENV APP_PASSWORD=adampaultom
+# APP_PASSWORD must be supplied at runtime — the server refuses to start without it.
+# Set it in your hosting dashboard (Render > Environment) or via -e APP_PASSWORD=...
+# APP_SECRET is optional; if omitted it is derived from APP_PASSWORD.
 ENV PORT=8000
 EXPOSE 8000
 

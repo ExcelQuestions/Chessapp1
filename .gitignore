@@ -19,3 +19,6 @@ dist/
 
 # Local run logs
 *.log
+
+# Local environment — never commit real secrets
+.env

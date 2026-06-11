@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: blindfold-chess
+    env: docker
+    dockerfilePath: ./Dockerfile
+    # Render injects PORT automatically; the Dockerfile CMD already uses it.
+    envVars:
+      - key: APP_PASSWORD
+        sync: false          # Set this in the Render dashboard — never commit it.
+      - key: APP_SECRET
+        generateValue: true  # Render generates a random value on first deploy.
