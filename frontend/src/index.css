@@ -1,0 +1,18 @@
+:root {
+  font-family: system-ui, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #0e1217;
+  color: #e7ecf3;
+}
+
+code {
+  font-family: ui-monospace, Consolas, monospace;
+}

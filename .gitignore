@@ -1,0 +1,21 @@
+# Stockfish engine binary (~114 MB — download per machine, don't commit)
+stockfish.exe
+stockfish
+stockfish_dl/
+stockfish.zip
+
+# Saved games
+game_*.pgn
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node / frontend build (frontend/.gitignore also covers these)
+node_modules/
+dist/
+
+# Local run logs
+*.log
