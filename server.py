@@ -15,7 +15,10 @@ State is kept in memory (a dict of games). For real hosting you'd swap this for
 Redis/Postgres keyed by game id -- the per-game logic here is unchanged.
 """
 
+import hashlib
+import hmac
 import os
+import secrets
 import sys
 import threading
 import uuid
@@ -24,14 +27,52 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import chess
 import chess.engine
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import blindfold_chess as bc  # reuse find_engine / format_move_list / build_pgn_game
 
 ENGINE_PATH = bc.find_engine()
+
+
+# --------------------------------------------------------------------------- #
+# Authentication: a single shared password gates the whole app.
+#
+# The password is read from APP_PASSWORD (falling back to a default so it works
+# out of the box). Logging in exchanges the password for a bearer token that
+# the client sends on every request. The token is a stateless HMAC, so it stays
+# valid across restarts and across multiple server instances without any shared
+# session store.
+#
+# NOTE: the default password below is committed to the repo, so for any real
+# deployment set APP_PASSWORD (and ideally APP_SECRET) to your own secrets.
+# --------------------------------------------------------------------------- #
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "adampaultom")
+_SECRET = os.environ.get("APP_SECRET") or hashlib.sha256(
+    ("blindfold:" + APP_PASSWORD).encode()
+).hexdigest()
+_TOKEN = hmac.new(_SECRET.encode(), b"authenticated", hashlib.sha256).hexdigest()
+
+
+def _password_ok(candidate):
+    return secrets.compare_digest(candidate or "", APP_PASSWORD)
+
+
+def _token_ok(candidate):
+    return secrets.compare_digest(candidate or "", _TOKEN)
+
+
+def require_auth(authorization: str = Header(default=""), token: str = ""):
+    """Allow the request through only with a valid bearer token, supplied either
+    in the Authorization header or as a ?token= query param (used by the PGN
+    download link, which can't set headers)."""
+    bearer = authorization[7:] if authorization[:7].lower() == "bearer " else ""
+    if _token_ok(bearer) or _token_ok(token):
+        return
+    raise HTTPException(401, "Authentication required.")
 
 app = FastAPI(title="Blindfold Chess")
 app.add_middleware(
@@ -58,6 +99,10 @@ class NewGame(BaseModel):
 
 class MoveIn(BaseModel):
     move: str  # standard algebraic notation (Nf3, exd5, O-O, e8=Q) or coordinates
+
+
+class Login(BaseModel):
+    password: str
 
 
 # --------------------------------------------------------------------------- #
@@ -166,11 +211,19 @@ def _do_engine_reply(g):
 # --------------------------------------------------------------------------- #
 @app.get("/api/health")
 def health():
-    return {"ok": ENGINE_PATH is not None, "engine": ENGINE_PATH}
+    # Left unauthenticated so load balancers / uptime checks can reach it.
+    return {"ok": ENGINE_PATH is not None}
+
+
+@app.post("/api/login")
+def login(body: Login):
+    if not _password_ok(body.password):
+        raise HTTPException(401, "Wrong password.")
+    return {"token": _TOKEN}
 
 
 @app.post("/api/games")
-def create_game(body: NewGame):
+def create_game(body: NewGame, _=Depends(require_auth)):
     if ENGINE_PATH is None:
         raise HTTPException(503, "Stockfish engine not found on the server.")
 
@@ -195,7 +248,7 @@ def create_game(body: NewGame):
 
 
 @app.get("/api/games/{game_id}")
-def get_game(game_id: str, show: str = "p"):
+def get_game(game_id: str, show: str = "p", _=Depends(require_auth)):
     with _lock:
         if game_id not in _games:
             raise HTTPException(404, "No such game.")
@@ -203,7 +256,7 @@ def get_game(game_id: str, show: str = "p"):
 
 
 @app.post("/api/games/{game_id}/move")
-def make_move(game_id: str, body: MoveIn, show: str = "p"):
+def make_move(game_id: str, body: MoveIn, show: str = "p", _=Depends(require_auth)):
     with _lock:
         if game_id not in _games:
             raise HTTPException(404, "No such game.")
@@ -231,10 +284,21 @@ def make_move(game_id: str, body: MoveIn, show: str = "p"):
 
 
 @app.get("/api/games/{game_id}/pgn", response_class=PlainTextResponse)
-def get_pgn(game_id: str):
+def get_pgn(game_id: str, _=Depends(require_auth)):
     with _lock:
         if game_id not in _games:
             raise HTTPException(404, "No such game.")
         g = _games[game_id]
         game = bc.build_pgn_game(g["board"], g["human"], g["level"])
         return str(game)
+
+
+# --------------------------------------------------------------------------- #
+# Serve the built React app (production). Mounted last so /api/* wins. In dev
+# you run Vite separately, so dist/ won't exist and this is simply skipped.
+# The SPA shell is public; the login screen lives inside it and every API call
+# it makes is gated by require_auth.
+# --------------------------------------------------------------------------- #
+_DIST = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend", "dist")
+if os.path.isdir(_DIST):
+    app.mount("/", StaticFiles(directory=_DIST, html=True), name="static")

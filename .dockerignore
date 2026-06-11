@@ -1,0 +1,16 @@
+.git
+.gitignore
+.gitattributes
+README.md
+
+# Big / generated things that the build creates fresh
+frontend/node_modules
+frontend/dist
+stockfish.exe
+stockfish
+
+# Local clutter
+__pycache__
+*.pyc
+*.log
+game_*.pgn

@@ -4,6 +4,41 @@
   padding: 24px 16px 48px;
 }
 
+header { position: relative; }
+.signout {
+  position: absolute;
+  top: 4px;
+  right: 0;
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid #2d3645;
+  background: #161b24;
+  color: #c7d0dc;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.signout:hover { background: #1c2330; }
+
+/* ----- login ----- */
+.login {
+  max-width: 360px;
+  margin: 12vh auto 0;
+  padding: 0 16px;
+  text-align: center;
+}
+.login h1 { font-size: 2rem; margin-bottom: 4px; }
+.login form { display: flex; gap: 8px; margin-top: 18px; }
+.login input {
+  flex: 1;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #2d3645;
+  background: #11151c;
+  color: #e7ecf3;
+  font-size: 1rem;
+}
+.login .error { text-align: left; }
+
 header h1 {
   margin: 0;
   font-size: 1.9rem;

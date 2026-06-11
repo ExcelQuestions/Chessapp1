@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Board from './Board'
-import { newGame, getGame, sendMove, pgnUrl } from './api'
+import Login from './Login'
+import { newGame, getGame, sendMove, pgnUrl, getToken, setToken, AuthError } from './api'
 import './App.css'
 
 // Piece types, in the canonical order the server uses.
@@ -19,6 +20,7 @@ function showString(visible) {
 }
 
 export default function App() {
+  const [authed, setAuthed] = useState(Boolean(getToken()))
   const [game, setGame] = useState(null) // latest state from the server
   const [level, setLevel] = useState(5)
   const [colour, setColour] = useState('white')
@@ -33,6 +35,22 @@ export default function App() {
 
   const show = showString(visible)
 
+  // Centralised error handling: an expired/invalid token drops us to login.
+  function fail(e) {
+    if (e instanceof AuthError) {
+      setAuthed(false)
+      setGame(null)
+    }
+    setError(e.message)
+  }
+
+  function signOut() {
+    setToken('')
+    setAuthed(false)
+    setGame(null)
+    setError(null)
+  }
+
   async function start() {
     setError(null)
     setSelected(null)
@@ -40,7 +58,7 @@ export default function App() {
     try {
       setGame(await newGame({ level, colour, thinkTime: 0.5, show }))
     } catch (e) {
-      setError(e.message)
+      fail(e)
     } finally {
       setBusy(false)
     }
@@ -54,7 +72,7 @@ export default function App() {
     try {
       setGame(await getGame(game.game_id, showString(nextVisible) || '-'))
     } catch (err) {
-      setError(err.message)
+      fail(err)
     }
   }
 
@@ -71,7 +89,7 @@ export default function App() {
       setSelected(null)
       setTyped('')
     } catch (e) {
-      setError(e.message)
+      fail(e)
       setSelected(null)
     } finally {
       setBusy(false)
@@ -107,9 +125,12 @@ export default function App() {
   const yourTurn = game && game.turn === 'human' && !game.game_over
   const colourLabel = game && (game.human_color === 'w' ? 'White' : 'Black')
 
+  if (!authed) return <Login onSuccess={() => setAuthed(true)} />
+
   return (
     <div className="app">
       <header>
+        <button className="signout" onClick={signOut}>Sign out</button>
         <h1>♟ Blindfold Chess</h1>
         <p className="tagline">
           Hide as much as you dare — whatever you hide lives only in your head.
