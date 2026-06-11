@@ -1,3 +1,8 @@
+/* Board square size: fluid on mobile, capped at 60px on desktop. */
+:root {
+  --sq: min(60px, calc((100vw - 32px) / 8));
+}
+
 .app {
   max-width: 880px;
   margin: 0 auto;
@@ -131,10 +136,15 @@ button.primary:disabled {
 }
 
 /* ----- board ----- */
+.board-wrap {
+  /* Prevents the board from ever pushing past the viewport width. */
+  max-width: 100%;
+  overflow-x: auto;
+}
 .board {
   display: grid;
-  grid-template-columns: repeat(8, 60px);
-  grid-template-rows: repeat(8, 60px);
+  grid-template-columns: repeat(8, var(--sq));
+  grid-template-rows: repeat(8, var(--sq));
   border: 3px solid #11151c;
   border-radius: 6px;
   overflow: hidden;
@@ -147,8 +157,10 @@ button.primary:disabled {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 38px;
+  font-size: calc(var(--sq) * 0.65);
   line-height: 1;
+  /* Ensure tap highlight doesn't look jarring on mobile. */
+  -webkit-tap-highlight-color: transparent;
 }
 .square.light { background: #e9eef6; }
 .square.dark { background: #6f86a6; }
@@ -182,25 +194,45 @@ button.primary:disabled {
 .last-move { color: #c7d0dc; }
 .last-move code, .hint code { background: #11151c; padding: 1px 5px; border-radius: 4px; }
 
-.move-entry { display: flex; gap: 8px; }
-.move-entry input {
-  flex: 1;
-  padding: 8px 10px;
-  border-radius: 8px;
-  border: 1px solid #2d3645;
+/* ----- move keypad ----- */
+.keypad { display: flex; flex-direction: column; gap: 5px; }
+
+.keypad-display {
+  padding: 8px 12px;
   background: #11151c;
-  color: #e7ecf3;
-  font-family: inherit;
-}
-.move-entry button {
-  padding: 8px 16px;
+  border: 1px solid #2d3645;
   border-radius: 8px;
-  border: none;
-  background: #2d3645;
-  color: #e7ecf3;
-  cursor: pointer;
+  min-height: 38px;
+  font-size: 1.05rem;
+  font-family: monospace;
+  letter-spacing: 0.05em;
 }
-.move-entry button:disabled { opacity: 0.5; cursor: default; }
+.keypad-placeholder { color: #9aa4b2; font-style: italic; font-size: 0.85rem; font-family: inherit; }
+
+.keypad-row { display: flex; gap: 4px; }
+
+.key {
+  flex: 1;
+  min-height: 40px;
+  padding: 0;
+  border: 1px solid #2d3645;
+  border-radius: 6px;
+  background: #1c2330;
+  color: #e7ecf3;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+.key:disabled { opacity: 0.35; cursor: default; }
+.key:active:not(:disabled) { background: #2d3645; }
+
+.key-piece  { background: #1e2a40; color: #8fb4ff; }
+.key-sym    { background: #2a2020; color: #ffb4b4; }
+.key-castle { background: #1e2a40; font-size: 0.78rem; }
+.key-back   { background: #3a2020; color: #ff9090; flex: 0.75; }
+.key-submit { background: #1a3020; color: #8fd18f; flex: 1.6; }
 .hint { font-size: 0.85rem; color: #9aa4b2; }
 
 .history h3 { margin: 0 0 4px; font-size: 0.95rem; color: #9aa4b2; }
@@ -210,3 +242,42 @@ button.primary:disabled {
 .pgn:hover { text-decoration: underline; }
 
 .placeholder { color: #9aa4b2; margin-top: 28px; }
+
+/* ----- mobile ----- */
+@media (max-width: 540px) {
+  .app { padding: 14px 12px 32px; }
+
+  header h1 { font-size: 1.4rem; padding-right: 80px; }
+  .tagline { font-size: 0.82rem; margin-bottom: 12px; }
+
+  /* Controls: stack vertically and stretch to full width. */
+  .controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px;
+  }
+  .controls label { justify-content: space-between; }
+  .controls input[type='range'] { width: auto; flex: 1; }
+  button.primary { padding: 11px; font-size: 1rem; }
+
+  /* Visibility: tighten gap so checkboxes wrap neatly. */
+  .visibility { gap: 8px 12px; padding: 10px 12px; }
+  .vis-presets { margin-left: 0; }
+
+  .game { gap: 16px; margin-top: 16px; }
+
+  /* Panel fills width below the board. */
+  .panel { min-width: 0; }
+
+  /* Login: fix overflow on narrow viewports. */
+  .login { width: 100%; max-width: 100%; padding: 0 20px; }
+  .login h1 { font-size: 1.5rem; }
+  .login form { flex-direction: column; }
+  .login input { font-size: 16px; }
+  .login button { width: 100%; padding: 11px; }
+
+  /* Keypad: slightly larger tap targets. */
+  .key { min-height: 44px; font-size: 0.95rem; }
+  .key-castle { font-size: 0.82rem; }
+}

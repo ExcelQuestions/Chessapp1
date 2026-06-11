@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Board from './Board'
 import Login from './Login'
+import MoveKeypad from './MoveKeypad'
 import { newGame, getGame, sendMove, pgnUrl, getToken, setToken, AuthError } from './api'
 import './App.css'
 
@@ -116,12 +117,6 @@ export default function App() {
     submit(coords)
   }
 
-  function onTypedSubmit(e) {
-    e.preventDefault()
-    const v = typed.trim() // SAN is case-sensitive (N vs n), so don't lowercase
-    if (v) submit(v)
-  }
-
   const yourTurn = game && game.turn === 'human' && !game.game_over
   const colourLabel = game && (game.human_color === 'w' ? 'White' : 'Black')
 
@@ -211,19 +206,12 @@ export default function App() {
               </div>
             )}
 
-            <form className="move-entry" onSubmit={onTypedSubmit}>
-              <input
-                value={typed}
-                onChange={(e) => setTyped(e.target.value)}
-                placeholder="Nf3, exd5, O-O (or click two squares)"
-                disabled={!yourTurn || busy}
-                spellCheck={false}
-                autoComplete="off"
-              />
-              <button type="submit" disabled={!yourTurn || busy}>
-                Move
-              </button>
-            </form>
+            <MoveKeypad
+              value={typed}
+              onChange={setTyped}
+              onSubmit={submit}
+              disabled={!yourTurn || busy}
+            />
             {selected && (
               <div className="hint">
                 From <code>{selected}</code> — click destination, or click{' '}
