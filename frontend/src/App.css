@@ -171,6 +171,23 @@ button.primary:disabled {
 .square.marked {
   box-shadow: inset 0 0 0 4px #6fd18f;
 }
+/* Pressure overlay: blue = yours, red = theirs, amber = contested.
+   Intensity steps by how firmly the square is held (i3 = pawn-solid). */
+.square .tint {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.tint.p-y.i1 { background: rgba(64, 132, 255, 0.16); }
+.tint.p-y.i2 { background: rgba(64, 132, 255, 0.32); }
+.tint.p-y.i3 { background: rgba(64, 132, 255, 0.48); }
+.tint.p-t.i1 { background: rgba(255, 64, 64, 0.16); }
+.tint.p-t.i2 { background: rgba(255, 64, 64, 0.32); }
+.tint.p-t.i3 { background: rgba(255, 64, 64, 0.48); }
+.tint.p-c.i1 { background: rgba(255, 196, 48, 0.20); }
+.tint.p-c.i2 { background: rgba(255, 196, 48, 0.36); }
+.tint.p-c.i3 { background: rgba(255, 196, 48, 0.52); }
+
 .square .coord {
   position: absolute;
   bottom: 2px;
@@ -179,6 +196,7 @@ button.primary:disabled {
   color: #00000055;
   pointer-events: none;
 }
+.piece { position: relative; } /* paints above the pressure tint */
 .piece.white { color: #fff; text-shadow: 0 0 2px #000, 0 1px 2px #0008; }
 .piece.black { color: #14181f; text-shadow: 0 0 2px #fff6; }
 
@@ -261,6 +279,15 @@ button.primary:disabled {
 .question-actions .key { min-width: 38px; }
 
 .quiz-score { color: #9aa4b2; font-size: 0.9rem; }
+.pressure-detail {
+  padding: 7px 11px;
+  background: #11151c;
+  border: 1px solid #2d3645;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  color: #c7d0dc;
+}
+.vis-pressure { font-weight: 600; color: #8fb4ff; }
 .answer-ok, .answer-bad {
   padding: 6px 12px;
   border-radius: 8px;

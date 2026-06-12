@@ -148,6 +148,7 @@ class NewGame(BaseModel):
     think_time: float = Field(0.5, gt=0, le=5)
     show: str = Field("p", max_length=6)
     mode: str = Field("play", pattern="^(play|train)$")
+    pressure: bool = False
 
 
 class MoveIn(BaseModel):
@@ -219,6 +220,114 @@ def _visible_map(board, show):
         for sq, piece in board.piece_map().items()
         if piece.symbol().lower() in visible
     }
+
+
+# --------------------------------------------------------------------------- #
+# Pressure / territory map: every square gets an owner and an intensity, based
+# on static exchange evaluation (the swap algorithm, cheapest captor first).
+# This is what makes a pawn the ideal defender and a queen a poor one — the
+# maths of the capture sequence, not hand-tuned weights. v1 limitations:
+# no x-ray attackers (batteries undercount) and no pin awareness.
+# --------------------------------------------------------------------------- #
+_VAL = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
+        chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 100}
+
+
+def _attacker_vals(board, color, sq):
+    """Ascending piece values of `color`'s attackers of `sq`."""
+    return sorted(_VAL[board.piece_at(a).piece_type]
+                  for a in board.attackers(color, sq))
+
+
+def _exchange(target_val, attackers, defenders):
+    """Material won by the side of `attackers` initiating captures on a piece
+    worth `target_val`, both sides swapping cheapest-first and free to stop
+    (stand pat) whenever continuing loses material."""
+    if not attackers:
+        return 0
+    return max(0, target_val - _exchange(attackers[0], defenders, attackers[1:]))
+
+
+def _bucket(pawns):
+    return 1 if pawns <= 1 else 2 if pawns == 2 else 3
+
+
+def _cover_strength(cheapest_val):
+    """Claim quality on an empty square: pawn cover is permanent, queen cover
+    evaporates the moment it's challenged."""
+    return 3 if cheapest_val == 1 else 2 if cheapest_val <= 3 else 1
+
+
+def _square_pressure(board, sq, human):
+    """(owner, intensity) for one square, owner relative to the human player:
+    'y' yours, 't' theirs, 'c' contested, or None for neutral."""
+    engine = not human
+    yours = _attacker_vals(board, human, sq)
+    theirs = _attacker_vals(board, engine, sq)
+    piece = board.piece_at(sq)
+
+    if piece is None:
+        if not yours and not theirs:
+            return None
+
+        def lands_safely(vals, opp_vals):
+            """Can this side's cheapest attacker sit on the square without
+            losing material? (The lander stops covering the square itself.)"""
+            if not vals:
+                return False
+            rest = list(vals)
+            lander = rest.pop(0)
+            return _exchange(lander, list(opp_vals), rest) == 0
+
+        y_safe = lands_safely(yours, theirs)
+        t_safe = lands_safely(theirs, yours)
+        if y_safe and not t_safe:
+            return ("y", _cover_strength(yours[0]))
+        if t_safe and not y_safe:
+            return ("t", _cover_strength(theirs[0]))
+        if y_safe and t_safe:
+            return ("c", 1)
+        # Neither side can land: ownership by denial — the cheaper coverer
+        # holds the square (an enemy pawn's coverage beats your rook's).
+        if yours and not theirs:
+            return ("y", _cover_strength(yours[0]))
+        if theirs and not yours:
+            return ("t", _cover_strength(theirs[0]))
+        if yours[0] != theirs[0]:
+            if yours[0] < theirs[0]:
+                return ("y", _cover_strength(yours[0]))
+            return ("t", _cover_strength(theirs[0]))
+        return ("c", 1)
+
+    mine = piece.color == human
+    if piece.piece_type == chess.KING:
+        # Exchange maths is meaningless for kings (check, not capture).
+        return ("y" if mine else "t", 1)
+
+    occ_val = _VAL[piece.piece_type]
+    captors = theirs if mine else yours
+    defenders = yours if mine else theirs
+    if not captors:
+        return ("y" if mine else "t", 1)
+    # Net result of the best capture sequence, unclamped: positive means the
+    # captors profit, zero is a dead-equal trade, negative means the capture
+    # fails — and by how much.
+    forced = occ_val - _exchange(captors[0], list(defenders), list(captors[1:]))
+    if forced > 0:
+        return ("t" if mine else "y", _bucket(forced))
+    if forced == 0:
+        inten = 1 if occ_val == 1 else 2 if occ_val == 3 else 3
+        return ("c", inten)
+    return ("y" if mine else "t", _bucket(-forced))
+
+
+def _pressure_map(board, human):
+    out = {}
+    for sq in chess.SQUARES:
+        r = _square_pressure(board, sq, human)
+        if r:
+            out[chess.square_name(sq)] = {"o": r[0], "i": r[1]}
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -328,7 +437,7 @@ def _check_answer(q, body):
     return body.count is not None and body.count == q["truth"]
 
 
-def _state(game_id, show="p"):
+def _state(game_id, show="p", pressure=False):
     g = _games[game_id]
     board = g["board"]
     outcome = board.outcome(claim_draw=True)
@@ -368,6 +477,10 @@ def _state(game_id, show="p"):
         out["question"] = ({"text": q["text"], "format": q["format"]}
                            if q and not over else None)
         out["score"] = g["score"]
+    # The overlay is suppressed while a quiz question is pending — it would
+    # answer "which of your pieces are hanging?" at a glance.
+    if pressure and not (g.get("mode") == "train" and g.get("question") and not over):
+        out["pressure"] = _pressure_map(board, g["human"])
     return out
 
 
@@ -434,19 +547,21 @@ def create_game(body: NewGame, _=Depends(require_auth)):
         }
         # If the human is Black, Stockfish (White) opens.
         _do_engine_reply(_games[game_id])
-        return _state(game_id, body.show)
+        return _state(game_id, body.show, body.pressure)
 
 
 @app.get("/api/games/{game_id}")
-def get_game(game_id: str, show: str = "p", _=Depends(require_auth)):
+def get_game(game_id: str, show: str = "p", pressure: int = 0,
+             _=Depends(require_auth)):
     with _lock:
         if game_id not in _games:
             raise HTTPException(404, "No such game.")
-        return _state(game_id, show)
+        return _state(game_id, show, bool(pressure))
 
 
 @app.post("/api/games/{game_id}/move")
-def make_move(game_id: str, body: MoveIn, show: str = "p", _=Depends(require_auth)):
+def make_move(game_id: str, body: MoveIn, show: str = "p", pressure: int = 0,
+              _=Depends(require_auth)):
     with _lock:
         if game_id not in _games:
             raise HTTPException(404, "No such game.")
@@ -472,12 +587,12 @@ def make_move(game_id: str, body: MoveIn, show: str = "p", _=Depends(require_aut
 
         board.push(move)
         _do_engine_reply(g)
-        return _state(game_id, show)
+        return _state(game_id, show, bool(pressure))
 
 
 @app.post("/api/games/{game_id}/answer")
 def answer_question(game_id: str, body: AnswerIn, show: str = "p",
-                    _=Depends(require_auth)):
+                    pressure: int = 0, _=Depends(require_auth)):
     with _lock:
         if game_id not in _games:
             raise HTTPException(404, "No such game.")
@@ -500,7 +615,53 @@ def answer_question(game_id: str, body: AnswerIn, show: str = "p",
         g["prev_question"] = q
         g["question"] = None
 
-        return {**_state(game_id, show), "answered": {"correct": correct}}
+        return {**_state(game_id, show, bool(pressure)),
+                "answered": {"correct": correct}}
+
+
+@app.get("/api/games/{game_id}/pressure/{square}")
+def pressure_detail(game_id: str, square: str, _=Depends(require_auth)):
+    """Tap-for-detail: attacker counts and the exchange verdict for one square.
+    Finer-grained than the bucketed overlay, so it gets the same quiz gating."""
+    with _lock:
+        if game_id not in _games:
+            raise HTTPException(404, "No such game.")
+        g = _games[game_id]
+        if g.get("mode") == "train" and g.get("question"):
+            raise HTTPException(409, "Answer the training question first.")
+        try:
+            sq = chess.parse_square(square.strip().lower())
+        except ValueError:
+            raise HTTPException(422, "Bad square name.")
+
+        board, human = g["board"], g["human"]
+        yours = _attacker_vals(board, human, sq)
+        theirs = _attacker_vals(board, not human, sq)
+        info = {"square": chess.square_name(sq),
+                "your_attackers": len(yours),
+                "their_attackers": len(theirs)}
+
+        piece = board.piece_at(sq)
+        if piece and piece.piece_type != chess.KING:
+            mine = piece.color == human
+            occ_val = _VAL[piece.piece_type]
+            captors = theirs if mine else yours
+            defenders = yours if mine else theirs
+            if not captors:
+                info["verdict"] = "Occupied; not attacked."
+            else:
+                forced = occ_val - _exchange(captors[0], list(defenders),
+                                             list(captors[1:]))
+                who = "them" if mine else "you"
+                if forced > 0:
+                    info["verdict"] = (f"Capturing here wins {who} {forced} "
+                                       f"pawn{'s' if forced != 1 else ''}.")
+                elif forced == 0:
+                    info["verdict"] = "A capture here is a dead-equal exchange."
+                else:
+                    info["verdict"] = (f"Capturing here would lose {who} "
+                                       f"{-forced} pawn{'s' if forced != -1 else ''}.")
+        return info
 
 
 @app.get("/api/games/{game_id}/pgn", response_class=PlainTextResponse)

@@ -54,16 +54,27 @@ export async function login(password) {
   return token
 }
 
-export function newGame({ level, colour, thinkTime, show, mode }) {
+export function newGame({ level, colour, thinkTime, show, mode, pressure }) {
   return fetch('/api/games', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ level, colour, think_time: thinkTime, show, mode }),
+    body: JSON.stringify({
+      level, colour, think_time: thinkTime, show, mode,
+      pressure: Boolean(pressure),
+    }),
   }).then(handle)
 }
 
-export function getGame(gameId, show) {
-  return fetch(`/api/games/${gameId}?show=${show}`, {
+export function getGame(gameId, show, pressure) {
+  return fetch(`/api/games/${gameId}?show=${show}&pressure=${pressure ? 1 : 0}`, {
+    headers: authHeaders(),
+  }).then(handle)
+}
+
+// Tap-for-detail on a square when the pressure overlay is on: attacker counts
+// and the exchange verdict in pawn units.
+export function pressureDetail(gameId, square) {
+  return fetch(`/api/games/${gameId}/pressure/${square}`, {
     headers: authHeaders(),
   }).then(handle)
 }
@@ -71,16 +82,16 @@ export function getGame(gameId, show) {
 // Training mode: answer the pending quiz question. `payload` carries exactly
 // one of {squares: [...]}, {yesno: bool} or {count: n} to match the question
 // format. Response is the usual game state plus {answered: {correct}}.
-export function sendAnswer(gameId, payload, show) {
-  return fetch(`/api/games/${gameId}/answer?show=${show}`, {
+export function sendAnswer(gameId, payload, show, pressure) {
+  return fetch(`/api/games/${gameId}/answer?show=${show}&pressure=${pressure ? 1 : 0}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   }).then(handle)
 }
 
-export function sendMove(gameId, move, show) {
-  return fetch(`/api/games/${gameId}/move?show=${show}`, {
+export function sendMove(gameId, move, show, pressure) {
+  return fetch(`/api/games/${gameId}/move?show=${show}&pressure=${pressure ? 1 : 0}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ move }),

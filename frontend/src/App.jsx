@@ -3,7 +3,7 @@ import Board from './Board'
 import Login from './Login'
 import MoveKeypad from './MoveKeypad'
 import Question from './Question'
-import { newGame, getGame, sendMove, sendAnswer, pgnUrl, getToken, setToken, AuthError } from './api'
+import { newGame, getGame, sendMove, sendAnswer, pressureDetail, pgnUrl, getToken, setToken, AuthError } from './api'
 import './App.css'
 
 // Piece types, in the canonical order the server uses.
@@ -31,6 +31,8 @@ export default function App() {
   const [typed, setTyped] = useState('')
   const [picked, setPicked] = useState([]) // squares tapped as a quiz answer
   const [lastAnswer, setLastAnswer] = useState(null) // {correct} of last quiz answer
+  const [pressureOn, setPressureOn] = useState(false)
+  const [detail, setDetail] = useState(null) // tap-for-detail text
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   // Which piece types are visible. Default = classic blindfold (pawns only).
@@ -61,9 +63,10 @@ export default function App() {
     setSelected(null)
     setPicked([])
     setLastAnswer(null)
+    setDetail(null)
     setBusy(true)
     try {
-      setGame(await newGame({ level, colour, thinkTime: 0.5, show, mode }))
+      setGame(await newGame({ level, colour, thinkTime: 0.5, show, mode, pressure: pressureOn }))
     } catch (e) {
       fail(e)
     } finally {
@@ -77,7 +80,19 @@ export default function App() {
     setVisible(nextVisible)
     if (!game) return
     try {
-      setGame(await getGame(game.game_id, showString(nextVisible) || '-'))
+      setGame(await getGame(game.game_id, showString(nextVisible) || '-', pressureOn))
+    } catch (err) {
+      fail(err)
+    }
+  }
+
+  async function togglePressure() {
+    const next = !pressureOn
+    setPressureOn(next)
+    if (!next) setDetail(null)
+    if (!game) return
+    try {
+      setGame(await getGame(game.game_id, show || '-', next))
     } catch (err) {
       fail(err)
     }
@@ -92,10 +107,11 @@ export default function App() {
     setError(null)
     setBusy(true)
     try {
-      setGame(await sendMove(game.game_id, move, show || '-'))
+      setGame(await sendMove(game.game_id, move, show || '-', pressureOn))
       setSelected(null)
       setTyped('')
       setLastAnswer(null)
+      setDetail(null)
     } catch (e) {
       fail(e)
       setSelected(null)
@@ -111,7 +127,7 @@ export default function App() {
     setError(null)
     setBusy(true)
     try {
-      const res = await sendAnswer(game.game_id, payload, show || '-')
+      const res = await sendAnswer(game.game_id, payload, show || '-', pressureOn)
       setGame(res)
       setLastAnswer(res.answered)
       setPicked([])
@@ -133,6 +149,15 @@ export default function App() {
         setPicked((p) => (p.includes(name) ? p.filter((s) => s !== name) : [...p, name]))
       }
       return
+    }
+    // Overlay on: a tap also fetches the exchange detail for that square
+    // (alongside its usual move-selection role).
+    if (pressureOn) {
+      pressureDetail(game.game_id, name)
+        .then((d) => setDetail(
+          `${d.square}: you ×${d.your_attackers}, them ×${d.their_attackers}` +
+          (d.verdict ? ` — ${d.verdict}` : '')))
+        .catch(() => {})
     }
     if (!selected) {
       setSelected(name)
@@ -210,6 +235,10 @@ export default function App() {
             {label}
           </label>
         ))}
+        <label className="vis-item vis-pressure">
+          <input type="checkbox" checked={pressureOn} onChange={togglePressure} />
+          Pressure
+        </label>
         <span className="vis-presets">
           <button type="button" onClick={() => setAll(true)}>All</button>
           <button type="button" onClick={() => setAll(false)}>None</button>
@@ -225,6 +254,7 @@ export default function App() {
             humanColor={game.human_color}
             selected={selected}
             marked={picked}
+            pressure={game.pressure || {}}
             onSquareClick={onSquareClick}
             disabled={busy || !yourTurn || (question && question.format !== 'squares')}
           />
@@ -263,6 +293,8 @@ export default function App() {
                 {lastAnswer.correct ? '✓ Correct' : '✗ Wrong'}
               </div>
             )}
+
+            {detail && <div className="pressure-detail">{detail}</div>}
 
             {question ? (
               <Question
