@@ -138,6 +138,10 @@ _games: dict = {}
 _lock = threading.Lock()
 _MAX_GAMES = 50
 
+# Glimpse drills: memorise a position, then paint its territory map.
+_drills: dict = {}
+_MAX_DRILLS = 50
+
 
 # --------------------------------------------------------------------------- #
 # Request bodies
@@ -161,6 +165,18 @@ class AnswerIn(BaseModel):
     squares: list[str] | None = Field(None, max_length=16)
     yesno: bool | None = None
     count: int | None = Field(None, ge=0, le=16)
+    paint: dict[str, str] | None = Field(None, max_length=64)
+
+
+class NewDrill(BaseModel):
+    colour: str = Field("random", pattern="^(white|black|random)$")
+    seconds: int = Field(10, ge=3, le=60)
+    level: int = Field(10, ge=0, le=20)
+
+
+class PaintIn(BaseModel):
+    """User's painted territory map: square name -> 'y' | 't' | 'c'."""
+    paint: dict[str, str] = Field(..., max_length=64)
 
 
 class Login(BaseModel):
@@ -361,6 +377,14 @@ def _gen_question(g):
     import random
     board, human = g["board"], g["human"]
     engine = not human
+
+    # Every 5th question is a paint round: reproduce the whole territory map
+    # from memory. Scored by percentage agreement; feedback stays score-only
+    # so the blindfold holds.
+    if g["score"]["asked"] % 5 == 4:
+        return {"type": "paint", "format": "paint",
+                "text": "Paint the territory map: who owns each square right now?",
+                "truth": _pressure_map(board, human)}
 
     own = {sq for sq, p in board.piece_map().items() if p.color == human}
     own_nonking = [sq for sq in own
@@ -601,7 +625,14 @@ def answer_question(game_id: str, body: AnswerIn, show: str = "p",
         if not q:
             raise HTTPException(409, "No question is pending.")
 
-        correct = _check_answer(q, body)
+        extra = {}
+        if q["format"] == "paint":
+            # Pass mark 80% — feedback is the percentage only, never the map.
+            pscore, _ = _paint_score(q["truth"], _norm_paint(body.paint or {}))
+            correct = pscore["pct"] >= 80
+            extra["pct"] = pscore["pct"]
+        else:
+            correct = _check_answer(q, body)
 
         s = g["score"]
         s["asked"] += 1
@@ -616,7 +647,130 @@ def answer_question(game_id: str, body: AnswerIn, show: str = "p",
         g["question"] = None
 
         return {**_state(game_id, show, bool(pressure)),
-                "answered": {"correct": correct}}
+                "answered": {"correct": correct, **extra}}
+
+
+# --------------------------------------------------------------------------- #
+# Glimpse drills: the de Groot recall experiment, upgraded to relations.
+# A plausible position is generated, shown briefly, then hidden; the user
+# paints who owns each square from memory and is diffed against the real
+# territory map. Truly random positions would defeat the point (no structure
+# to chunk), so positions come from a few random opening plies followed by
+# engine self-play — varied, but always chess-shaped.
+# --------------------------------------------------------------------------- #
+def _norm_paint(raw):
+    """Validate and canonicalise a painted map: square name -> y/t/c."""
+    paint = {}
+    for k, v in raw.items():
+        try:
+            sq = chess.square_name(chess.parse_square(k.strip().lower()))
+        except ValueError:
+            raise HTTPException(422, f"Bad square name: {k}")
+        if v not in ("y", "t", "c"):
+            raise HTTPException(422, f"Bad owner (use y/t/c): {v}")
+        paint[sq] = v
+    return paint
+
+
+def _paint_score(truth, paint):
+    """Diff a painted map against the true territory map (ownership only,
+    intensity isn't tested). Judged set = every square either map names, so
+    painting nothing scores zero rather than 'no mistakes'."""
+    judged = set(truth) | set(paint)
+    wrong = sorted(sq for sq in judged
+                   if paint.get(sq) != (truth[sq]["o"] if sq in truth else None))
+    right = len(judged) - len(wrong)
+    missed = sum(1 for sq in wrong if sq in truth)
+    score = {
+        "pct": round(100 * right / len(judged)) if judged else 100,
+        "right": right,
+        "wrong": len(wrong),
+        "missed": missed,
+        "phantom": len(wrong) - missed,
+    }
+    return score, wrong
+
+
+def _drill_position(level):
+    """A middlegame-ish position: random opening plies for variety, then
+    Stockfish (one engine session) plays both sides at the given skill."""
+    import random
+    board = chess.Board()
+    for _ in range(random.randint(4, 8)):
+        moves = list(board.legal_moves)
+        if not moves:
+            break
+        board.push(random.choice(moves))
+
+    plies = random.randint(10, 36)
+    engine = chess.engine.SimpleEngine.popen_uci(ENGINE_PATH)
+    try:
+        try:
+            engine.configure({"Threads": 1, "Skill Level": level})
+        except chess.engine.EngineError:
+            pass
+        for _ in range(plies):
+            if board.is_game_over(claim_draw=True):
+                break
+            board.push(engine.play(board, chess.engine.Limit(time=0.02)).move)
+    finally:
+        engine.quit()
+
+    # Never hand out a finished position.
+    while board.move_stack and board.is_game_over(claim_draw=True):
+        board.pop()
+    return board
+
+
+@app.post("/api/drills")
+def create_drill(body: NewDrill, _=Depends(require_auth)):
+    if ENGINE_PATH is None:
+        raise HTTPException(503, "Stockfish engine not found on the server.")
+
+    import random
+    if body.colour == "random":
+        human = random.choice([chess.WHITE, chess.BLACK])
+    else:
+        human = chess.WHITE if body.colour == "white" else chess.BLACK
+
+    board = _drill_position(body.level)  # engine playout outside the lock
+    drill_id = uuid.uuid4().hex[:12]
+    with _lock:
+        if len(_drills) >= _MAX_DRILLS:
+            del _drills[next(iter(_drills))]
+        _drills[drill_id] = {
+            "board": board,
+            "human": human,
+            "truth": _pressure_map(board, human),
+            "done": False,
+        }
+    return {
+        "drill_id": drill_id,
+        "cells": _visible_map(board, ALL_TYPES),  # everything, for the glimpse
+        "human_color": "w" if human == chess.WHITE else "b",
+        "reveal_seconds": body.seconds,
+    }
+
+
+@app.post("/api/drills/{drill_id}/paint")
+def paint_drill(drill_id: str, body: PaintIn, _=Depends(require_auth)):
+    with _lock:
+        if drill_id not in _drills:
+            raise HTTPException(404, "No such drill.")
+        d = _drills[drill_id]
+        if d["done"]:
+            raise HTTPException(409, "This drill has already been answered.")
+
+        score, wrong = _paint_score(d["truth"], _norm_paint(body.paint))
+
+        d["done"] = True
+        return {
+            "score": score,
+            "wrong": wrong,
+            "truth": d["truth"],
+            "cells": _visible_map(d["board"], ALL_TYPES),
+            "human_color": "w" if d["human"] == chess.WHITE else "b",
+        }
 
 
 @app.get("/api/games/{game_id}/pressure/{square}")

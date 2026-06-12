@@ -71,6 +71,24 @@ export function getGame(gameId, show, pressure) {
   }).then(handle)
 }
 
+// Glimpse drill: generate a position to memorise, then submit a painted
+// territory map ({square: 'y'|'t'|'c'}) for diffing against the truth.
+export function newDrill({ colour, seconds, level }) {
+  return fetch('/api/drills', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ colour, seconds, level }),
+  }).then(handle)
+}
+
+export function paintDrill(drillId, paint) {
+  return fetch(`/api/drills/${drillId}/paint`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ paint }),
+  }).then(handle)
+}
+
 // Tap-for-detail on a square when the pressure overlay is on: attacker counts
 // and the exchange verdict in pawn units.
 export function pressureDetail(gameId, square) {

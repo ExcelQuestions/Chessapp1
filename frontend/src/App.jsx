@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Board from './Board'
+import Drill from './Drill'
 import Login from './Login'
 import MoveKeypad from './MoveKeypad'
 import Question from './Question'
@@ -30,7 +31,8 @@ export default function App() {
   const [selected, setSelected] = useState(null) // first-clicked square
   const [typed, setTyped] = useState('')
   const [picked, setPicked] = useState([]) // squares tapped as a quiz answer
-  const [lastAnswer, setLastAnswer] = useState(null) // {correct} of last quiz answer
+  const [qpaint, setQpaint] = useState({}) // territory map for paint questions
+  const [lastAnswer, setLastAnswer] = useState(null) // {correct, pct?} of last quiz answer
   const [pressureOn, setPressureOn] = useState(false)
   const [detail, setDetail] = useState(null) // tap-for-detail text
   const [error, setError] = useState(null)
@@ -132,6 +134,7 @@ export default function App() {
       setGame(res)
       setLastAnswer(res.answered)
       setPicked([])
+      setQpaint({})
     } catch (e) {
       fail(e)
     } finally {
@@ -148,6 +151,16 @@ export default function App() {
     if (question) {
       if (question.format === 'squares') {
         setPicked((p) => (p.includes(name) ? p.filter((s) => s !== name) : [...p, name]))
+      } else if (question.format === 'paint') {
+        // Cycle ownership: yours -> theirs -> contested -> clear.
+        setQpaint((p) => {
+          const NEXT = { y: 't', t: 'c', c: null }
+          const nxt = p[name] ? NEXT[p[name]] : 'y'
+          const out = { ...p }
+          if (nxt) out[name] = nxt
+          else delete out[name]
+          return out
+        })
       }
       return
     }
@@ -219,14 +232,17 @@ export default function App() {
           <select value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="play">Play</option>
             <option value="train">Training</option>
+            <option value="drill">Glimpse drill</option>
           </select>
         </label>
-        <button className="primary" onClick={start} disabled={busy}>
-          {game ? 'New game' : 'Start'}
-        </button>
+        {mode !== 'drill' && (
+          <button className="primary" onClick={start} disabled={busy}>
+            {game ? 'New game' : 'Start'}
+          </button>
+        )}
       </section>
 
-      <section className="visibility">
+      {mode !== 'drill' && <section className="visibility">
         <span className="vis-label">Show:</span>
         {TYPES.map(([t, label]) => (
           <label key={t} className="vis-item">
@@ -246,20 +262,26 @@ export default function App() {
           <button type="button" onClick={() => setAll(true)}>All</button>
           <button type="button" onClick={() => setAll(false)}>None</button>
         </span>
-      </section>
+      </section>}
 
       {error && <div className="error">{error}</div>}
 
-      {game && (
+      {mode === 'drill' && <Drill colour={colour} level={level} onError={fail} />}
+
+      {mode !== 'drill' && game && (
         <main className="game">
           <Board
             cells={game.cells}
             humanColor={game.human_color}
             selected={selected}
             marked={picked}
-            pressure={game.pressure || {}}
+            pressure={
+              question && question.format === 'paint'
+                ? Object.fromEntries(Object.entries(qpaint).map(([sq, o]) => [sq, { o, i: 2 }]))
+                : game.pressure || {}
+            }
             onSquareClick={onSquareClick}
-            disabled={busy || !yourTurn || (question && question.format !== 'squares')}
+            disabled={busy || !yourTurn || (question && !['squares', 'paint'].includes(question.format))}
           />
 
           <aside className="panel">
@@ -294,6 +316,7 @@ export default function App() {
             {lastAnswer && (
               <div className={lastAnswer.correct ? 'answer-ok' : 'answer-bad'}>
                 {lastAnswer.correct ? '✓ Correct' : '✗ Wrong'}
+                {lastAnswer.pct != null && ` — ${lastAnswer.pct}% agreement`}
               </div>
             )}
 
@@ -303,7 +326,8 @@ export default function App() {
               <Question
                 question={question}
                 picked={picked}
-                onClearPicked={() => setPicked([])}
+                paint={qpaint}
+                onClearPicked={() => { setPicked([]); setQpaint({}) }}
                 onAnswer={answer}
                 disabled={busy}
               />
@@ -334,7 +358,7 @@ export default function App() {
         </main>
       )}
 
-      {!game && !error && (
+      {mode !== 'drill' && !game && !error && (
         <p className="placeholder">
           Choose what to show, pick a level and colour, then press Start.
         </p>

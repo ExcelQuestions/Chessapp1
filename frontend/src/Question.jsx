@@ -7,8 +7,10 @@
 //             passes the current selection in `picked`)
 //   yesno   — two buttons
 //   count   — number buttons 0-8
+//   paint   — the user paints a territory map on the board (parent owns the
+//             map and passes it in `paint`); scored by percentage server-side
 
-export default function Question({ question, picked, onClearPicked, onAnswer, disabled }) {
+export default function Question({ question, picked, paint = {}, onClearPicked, onAnswer, disabled }) {
   const fmt = question.format
 
   return (
@@ -67,6 +69,33 @@ export default function Question({ question, picked, onClearPicked, onAnswer, di
             </button>
           ))}
         </div>
+      )}
+
+      {fmt === 'paint' && (
+        <>
+          <div className="question-picked">
+            <span className="question-hint">
+              Tap squares to cycle: yours (blue) → theirs (red) → contested (amber) → clear.
+              80% agreement passes.
+            </span>
+          </div>
+          <div className="question-actions">
+            <button
+              className="key key-back"
+              onClick={onClearPicked}
+              disabled={disabled || !Object.keys(paint).length}
+            >
+              Clear
+            </button>
+            <button
+              className="key key-submit"
+              onClick={() => onAnswer({ paint })}
+              disabled={disabled}
+            >
+              Submit map ({Object.keys(paint).length})
+            </button>
+          </div>
+        </>
       )}
     </div>
   )

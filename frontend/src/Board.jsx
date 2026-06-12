@@ -13,7 +13,7 @@ const GLYPH = {
 
 // `pressure` maps square name -> {o: 'y'|'t'|'c', i: 1-3}: who owns the square
 // (yours / theirs / contested) and how firmly. Rendered as a translucent tint.
-export default function Board({ cells, humanColor, selected, marked = [], pressure = {}, onSquareClick, disabled }) {
+export default function Board({ cells, humanColor, selected, marked = [], pressure = {}, wrong = [], onSquareClick, disabled }) {
   const whiteView = humanColor === 'w'
   // Ranks top-to-bottom, files left-to-right, flipped for Black's perspective.
   const ranks = whiteView ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8]
@@ -47,6 +47,7 @@ export default function Board({ cells, humanColor, selected, marked = [], pressu
                 {pressure[name] && (
                   <span className={`tint p-${pressure[name].o} i${pressure[name].i}`} />
                 )}
+                {wrong.includes(name) && <span className="wrongmark">✗</span>}
                 {symbol && (
                   <span className={'piece ' + (isWhitePiece ? 'white' : 'black')}>
                     {GLYPH[symbol]}

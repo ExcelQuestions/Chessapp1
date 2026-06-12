@@ -312,6 +312,64 @@ button.primary:disabled {
 
 .placeholder { color: #9aa4b2; margin-top: 28px; }
 
+/* ----- glimpse drill ----- */
+.drill {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  margin-top: 22px;
+}
+.drill-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 480px;
+}
+.drill-intro p { margin: 0; color: #c7d0dc; line-height: 1.5; }
+.drill-intro label { display: flex; align-items: center; gap: 10px; font-size: 0.9rem; }
+.drill-count {
+  font-size: 2.2rem;
+  font-weight: 800;
+  color: #ffd34d;
+  line-height: 1;
+}
+.drill-bar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.drill-legend { display: flex; gap: 12px; }
+.legend-item { display: flex; align-items: center; gap: 5px; font-size: 0.85rem; color: #c7d0dc; }
+.legend-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  display: inline-block;
+}
+.legend-swatch.p-y { background: rgba(64, 132, 255, 0.6); }
+.legend-swatch.p-t { background: rgba(255, 64, 64, 0.6); }
+.legend-swatch.p-c { background: rgba(255, 196, 48, 0.6); }
+.drill-hint { color: #9aa4b2; font-size: 0.82rem; font-style: italic; }
+.drill-actions { display: flex; gap: 8px; }
+.drill-actions .key { min-height: 40px; padding: 0 16px; flex: none; }
+.drill-score { font-size: 1.05rem; color: #c7d0dc; }
+.drill-score strong { color: #ffd34d; font-size: 1.3rem; }
+
+.square .wrongmark {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: calc(var(--sq) * 0.45);
+  font-weight: 900;
+  color: #ff2d6f;
+  text-shadow: 0 0 3px #000;
+  pointer-events: none;
+}
+
 /* ----- mobile ----- */
 @media (max-width: 540px) {
   .app { padding: 14px 12px 32px; }
