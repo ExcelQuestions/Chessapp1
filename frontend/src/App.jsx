@@ -89,6 +89,7 @@ export default function App() {
   async function togglePressure() {
     const next = !pressureOn
     setPressureOn(next)
+    setSelected(null) // drop any half-built move; taps become inspection
     if (!next) setDetail(null)
     if (!game) return
     try {
@@ -150,14 +151,16 @@ export default function App() {
       }
       return
     }
-    // Overlay on: a tap also fetches the exchange detail for that square
-    // (alongside its usual move-selection role).
+    // Overlay on: taps are inspection only — fetch the exchange detail and
+    // never select a move (too easy to blunder a piece while studying the
+    // map). Moves go through the keypad until the overlay is toggled off.
     if (pressureOn) {
       pressureDetail(game.game_id, name)
         .then((d) => setDetail(
           `${d.square}: you ×${d.your_attackers}, them ×${d.their_attackers}` +
           (d.verdict ? ` — ${d.verdict}` : '')))
         .catch(() => {})
+      return
     }
     if (!selected) {
       setSelected(name)
