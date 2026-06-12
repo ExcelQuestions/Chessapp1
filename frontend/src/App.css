@@ -168,6 +168,9 @@ button.primary:disabled {
 .square.selected {
   box-shadow: inset 0 0 0 4px #ffd34d;
 }
+.square.marked {
+  box-shadow: inset 0 0 0 4px #6fd18f;
+}
 .square .coord {
   position: absolute;
   bottom: 2px;
@@ -227,6 +230,45 @@ button.primary:disabled {
 }
 .key:disabled { opacity: 0.35; cursor: default; }
 .key:active:not(:disabled) { background: #2d3645; }
+
+/* ----- training quiz ----- */
+.question {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background: #1c2330;
+  border: 1px solid #2d3645;
+  border-radius: 10px;
+}
+.question-text { font-weight: 600; line-height: 1.4; }
+.question-picked {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-height: 26px;
+  align-items: center;
+}
+.question-picked code {
+  background: #11151c;
+  border: 1px solid #2d3645;
+  padding: 2px 7px;
+  border-radius: 5px;
+  color: #8fd18f;
+}
+.question-hint { color: #9aa4b2; font-size: 0.85rem; font-style: italic; }
+.question-actions { display: flex; gap: 4px; flex-wrap: wrap; }
+.question-actions .key { min-width: 38px; }
+
+.quiz-score { color: #9aa4b2; font-size: 0.9rem; }
+.answer-ok, .answer-bad {
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-weight: 700;
+  width: fit-content;
+}
+.answer-ok  { background: #1a3020; color: #8fd18f; }
+.answer-bad { background: #3a1d1d; color: #ffb4b4; }
 
 .key-piece  { background: #1e2a40; color: #8fb4ff; }
 .key-sym    { background: #2a2020; color: #ffb4b4; }

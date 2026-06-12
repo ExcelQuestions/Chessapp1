@@ -54,17 +54,28 @@ export async function login(password) {
   return token
 }
 
-export function newGame({ level, colour, thinkTime, show }) {
+export function newGame({ level, colour, thinkTime, show, mode }) {
   return fetch('/api/games', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ level, colour, think_time: thinkTime, show }),
+    body: JSON.stringify({ level, colour, think_time: thinkTime, show, mode }),
   }).then(handle)
 }
 
 export function getGame(gameId, show) {
   return fetch(`/api/games/${gameId}?show=${show}`, {
     headers: authHeaders(),
+  }).then(handle)
+}
+
+// Training mode: answer the pending quiz question. `payload` carries exactly
+// one of {squares: [...]}, {yesno: bool} or {count: n} to match the question
+// format. Response is the usual game state plus {answered: {correct}}.
+export function sendAnswer(gameId, payload, show) {
+  return fetch(`/api/games/${gameId}/answer?show=${show}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
   }).then(handle)
 }
 

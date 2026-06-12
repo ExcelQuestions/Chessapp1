@@ -2,7 +2,8 @@ import { useState } from 'react'
 import Board from './Board'
 import Login from './Login'
 import MoveKeypad from './MoveKeypad'
-import { newGame, getGame, sendMove, pgnUrl, getToken, setToken, AuthError } from './api'
+import Question from './Question'
+import { newGame, getGame, sendMove, sendAnswer, pgnUrl, getToken, setToken, AuthError } from './api'
 import './App.css'
 
 // Piece types, in the canonical order the server uses.
@@ -25,8 +26,11 @@ export default function App() {
   const [game, setGame] = useState(null) // latest state from the server
   const [level, setLevel] = useState(5)
   const [colour, setColour] = useState('white')
+  const [mode, setMode] = useState('play')
   const [selected, setSelected] = useState(null) // first-clicked square
   const [typed, setTyped] = useState('')
+  const [picked, setPicked] = useState([]) // squares tapped as a quiz answer
+  const [lastAnswer, setLastAnswer] = useState(null) // {correct} of last quiz answer
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   // Which piece types are visible. Default = classic blindfold (pawns only).
@@ -55,9 +59,11 @@ export default function App() {
   async function start() {
     setError(null)
     setSelected(null)
+    setPicked([])
+    setLastAnswer(null)
     setBusy(true)
     try {
-      setGame(await newGame({ level, colour, thinkTime: 0.5, show }))
+      setGame(await newGame({ level, colour, thinkTime: 0.5, show, mode }))
     } catch (e) {
       fail(e)
     } finally {
@@ -89,6 +95,7 @@ export default function App() {
       setGame(await sendMove(game.game_id, move, show || '-'))
       setSelected(null)
       setTyped('')
+      setLastAnswer(null)
     } catch (e) {
       fail(e)
       setSelected(null)
@@ -97,8 +104,36 @@ export default function App() {
     }
   }
 
+  // Training mode: submit the pending quiz answer. The server replies with the
+  // usual state plus whether we were right — that's all the feedback there is.
+  async function answer(payload) {
+    if (!game || busy) return
+    setError(null)
+    setBusy(true)
+    try {
+      const res = await sendAnswer(game.game_id, payload, show || '-')
+      setGame(res)
+      setLastAnswer(res.answered)
+      setPicked([])
+    } catch (e) {
+      fail(e)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const question = game && !game.game_over ? game.question : null
+
   function onSquareClick(name) {
     if (!game || game.turn !== 'human') return
+    // While a squares-format question is pending, taps build the answer
+    // instead of a move.
+    if (question) {
+      if (question.format === 'squares') {
+        setPicked((p) => (p.includes(name) ? p.filter((s) => s !== name) : [...p, name]))
+      }
+      return
+    }
     if (!selected) {
       setSelected(name)
       return
@@ -151,6 +186,13 @@ export default function App() {
             <option value="random">Random</option>
           </select>
         </label>
+        <label>
+          Mode
+          <select value={mode} onChange={(e) => setMode(e.target.value)}>
+            <option value="play">Play</option>
+            <option value="train">Training</option>
+          </select>
+        </label>
         <button className="primary" onClick={start} disabled={busy}>
           {game ? 'New game' : 'Start'}
         </button>
@@ -182,8 +224,9 @@ export default function App() {
             cells={game.cells}
             humanColor={game.human_color}
             selected={selected}
+            marked={picked}
             onSquareClick={onSquareClick}
-            disabled={busy || !yourTurn}
+            disabled={busy || !yourTurn || (question && question.format !== 'squares')}
           />
 
           <aside className="panel">
@@ -206,12 +249,37 @@ export default function App() {
               </div>
             )}
 
-            <MoveKeypad
-              value={typed}
-              onChange={setTyped}
-              onSubmit={submit}
-              disabled={!yourTurn || busy}
-            />
+            {game.mode === 'train' && game.score && (
+              <div className="quiz-score">
+                Quiz: {game.score.correct}/{game.score.asked}
+                {game.score.asked > 0 &&
+                  ` (${Math.round((100 * game.score.correct) / game.score.asked)}%)`}
+                {' · '}streak {game.score.streak} (best {game.score.best})
+              </div>
+            )}
+
+            {lastAnswer && (
+              <div className={lastAnswer.correct ? 'answer-ok' : 'answer-bad'}>
+                {lastAnswer.correct ? '✓ Correct' : '✗ Wrong'}
+              </div>
+            )}
+
+            {question ? (
+              <Question
+                question={question}
+                picked={picked}
+                onClearPicked={() => setPicked([])}
+                onAnswer={answer}
+                disabled={busy}
+              />
+            ) : (
+              <MoveKeypad
+                value={typed}
+                onChange={setTyped}
+                onSubmit={submit}
+                disabled={!yourTurn || busy}
+              />
+            )}
             {selected && (
               <div className="hint">
                 From <code>{selected}</code> — click destination, or click{' '}

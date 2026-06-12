@@ -11,7 +11,7 @@ const GLYPH = {
   p: '♟', n: '♞', b: '♝', r: '♜', q: '♛', k: '♚',
 }
 
-export default function Board({ cells, humanColor, selected, onSquareClick, disabled }) {
+export default function Board({ cells, humanColor, selected, marked = [], onSquareClick, disabled }) {
   const whiteView = humanColor === 'w'
   // Ranks top-to-bottom, files left-to-right, flipped for Black's perspective.
   const ranks = whiteView ? [8, 7, 6, 5, 4, 3, 2, 1] : [1, 2, 3, 4, 5, 6, 7, 8]
@@ -27,6 +27,7 @@ export default function Board({ cells, humanColor, selected, onSquareClick, disa
             // a1 is dark: a square is light when file index + rank is even.
             const isLight = (FILES.indexOf(file) + rank) % 2 === 0
             const isSelected = selected === name
+            const isMarked = marked.includes(name)
             const isWhitePiece = symbol && symbol === symbol.toUpperCase()
             return (
               <button
@@ -34,7 +35,8 @@ export default function Board({ cells, humanColor, selected, onSquareClick, disa
                 className={
                   'square' +
                   (isLight ? ' light' : ' dark') +
-                  (isSelected ? ' selected' : '')
+                  (isSelected ? ' selected' : '') +
+                  (isMarked ? ' marked' : '')
                 }
                 onClick={() => !disabled && onSquareClick(name)}
                 disabled={disabled}

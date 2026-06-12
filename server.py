@@ -147,10 +147,19 @@ class NewGame(BaseModel):
     colour: str = Field("white", pattern="^(white|black|random)$")
     think_time: float = Field(0.5, gt=0, le=5)
     show: str = Field("p", max_length=6)
+    mode: str = Field("play", pattern="^(play|train)$")
 
 
 class MoveIn(BaseModel):
     move: str = Field(..., min_length=2, max_length=10)
+
+
+class AnswerIn(BaseModel):
+    """One field per answer format; the client sends whichever matches the
+    pending question."""
+    squares: list[str] | None = Field(None, max_length=16)
+    yesno: bool | None = None
+    count: int | None = Field(None, ge=0, le=16)
 
 
 class Login(BaseModel):
@@ -212,6 +221,113 @@ def _visible_map(board, show):
     }
 
 
+# --------------------------------------------------------------------------- #
+# Relation training: quiz questions generated from the attack graph.
+# The truth never leaves the server, so answering is the only way to find out.
+# --------------------------------------------------------------------------- #
+_CENTER = [chess.parse_square(n) for n in (
+    "c3", "d3", "e3", "f3", "c4", "d4", "e4", "f4",
+    "c5", "d5", "e5", "f5", "c6", "d6", "e6", "f6",
+)]
+
+
+def _squares_q(qtype, text, squares):
+    return {"type": qtype, "format": "squares", "text": text,
+            "truth": sorted(chess.square_name(s) for s in squares)}
+
+
+def _yesno_q(qtype, text, truth):
+    return {"type": qtype, "format": "yesno", "text": text, "truth": bool(truth)}
+
+
+def _count_q(qtype, text, truth):
+    return {"type": qtype, "format": "count", "text": text, "truth": int(truth)}
+
+
+def _gen_question(g):
+    """Pick the next quiz question, salience first: newly hanging pieces, then
+    threats from the engine's last move, then pins, then random coverage.
+    A question identical to the previous one (same type and truth) is skipped
+    so a piece that stays hanging doesn't get asked about every move."""
+    import random
+    board, human = g["board"], g["human"]
+    engine = not human
+
+    own = {sq for sq, p in board.piece_map().items() if p.color == human}
+    own_nonking = [sq for sq in own
+                   if board.piece_at(sq).piece_type != chess.KING]
+
+    hanging = [sq for sq in own_nonking
+               if board.attackers(engine, sq) and not board.attackers(human, sq)]
+    pinned = [sq for sq in own_nonking if board.is_pinned(human, sq)]
+
+    salient = []
+    if hanging:
+        salient.append(_squares_q(
+            "hanging",
+            "Which of your pieces are attacked and undefended right now?",
+            hanging))
+    last = g.get("last_engine")
+    if last:
+        to_sq = chess.parse_square(last["uci"][2:4])
+        hits = [sq for sq in board.attacks(to_sq) if sq in own]
+        if hits:
+            salient.append(_squares_q(
+                "threat",
+                f"Stockfish just played {last['san']}. "
+                "Which of your pieces does that piece now attack?",
+                hits))
+    if pinned:
+        salient.append(_yesno_q(
+            "pin", "Is at least one of your pieces pinned to your king?", True))
+
+    coverage = []
+    if own_nonking:
+        sq = random.choice(own_nonking)
+        piece = board.piece_at(sq)
+        coverage.append(_yesno_q(
+            "defended",
+            f"Is your {chess.piece_name(piece.piece_type)} on "
+            f"{chess.square_name(sq)} defended by another of your pieces?",
+            bool(board.attackers(human, sq))))
+    sq = random.choice(_CENTER)
+    coverage.append(_count_q(
+        "count",
+        f"How many of Stockfish's pieces attack the square {chess.square_name(sq)}?",
+        len(board.attackers(engine, sq))))
+    sq = random.choice(_CENTER)
+    coverage.append(_squares_q(
+        "attackers",
+        f"Which of your pieces attack the square {chess.square_name(sq)}?",
+        board.attackers(human, sq)))
+    coverage.append(_squares_q(
+        "hanging",
+        "Which of your pieces are attacked and undefended right now?",
+        hanging))
+    coverage.append(_yesno_q(
+        "pin", "Is at least one of your pieces pinned to your king?",
+        bool(pinned)))
+
+    prev = g.get("prev_question")
+    for q in salient + [random.choice(coverage)]:
+        if not prev or (q["type"], q["truth"]) != (prev["type"], prev["truth"]):
+            return q
+    return random.choice(coverage)
+
+
+def _check_answer(q, body):
+    if q["format"] == "squares":
+        try:
+            got = sorted({chess.square_name(chess.parse_square(s.strip().lower()))
+                          for s in (body.squares or [])})
+        except ValueError:
+            return False
+        return got == q["truth"]
+    if q["format"] == "yesno":
+        return body.yesno is not None and body.yesno == q["truth"]
+    return body.count is not None and body.count == q["truth"]
+
+
 def _state(game_id, show="p"):
     g = _games[game_id]
     board = g["board"]
@@ -230,7 +346,7 @@ def _state(game_id, show="p"):
             status = "you_win" if won else "engine_win"
             result_text = ("You win" if won else "Stockfish wins") + f" by {reason}"
 
-    return {
+    out = {
         "game_id": game_id,
         "cells": _visible_map(board, show),
         "show": _clean_show(show),
@@ -245,6 +361,14 @@ def _state(game_id, show="p"):
         "level": g["level"],
         "move_count": len(board.move_stack),
     }
+    if g.get("mode") == "train":
+        q = g.get("question")
+        out["mode"] = "train"
+        # Send only the question itself — never the truth.
+        out["question"] = ({"text": q["text"], "format": q["format"]}
+                           if q and not over else None)
+        out["score"] = g["score"]
+    return out
 
 
 def _do_engine_reply(g):
@@ -256,6 +380,10 @@ def _do_engine_reply(g):
     san = board.san(move)
     board.push(move)
     g["last_engine"] = {"uci": move.uci(), "san": san}
+    # Training mode: each engine reply is followed by a quiz question, which
+    # must be answered before the next human move is accepted.
+    if g.get("mode") == "train" and not board.is_game_over(claim_draw=True):
+        g["question"] = _gen_question(g)
 
 
 # --------------------------------------------------------------------------- #
@@ -298,6 +426,11 @@ def create_game(body: NewGame, _=Depends(require_auth)):
             "level": body.level,
             "think_time": body.think_time,
             "last_engine": None,
+            "mode": body.mode,
+            "question": None,
+            "prev_question": None,
+            "score": {"asked": 0, "correct": 0, "streak": 0, "best": 0,
+                      "types": {}},
         }
         # If the human is Black, Stockfish (White) opens.
         _do_engine_reply(_games[game_id])
@@ -324,6 +457,8 @@ def make_move(game_id: str, body: MoveIn, show: str = "p", _=Depends(require_aut
             raise HTTPException(409, "Game is already over.")
         if board.turn != g["human"]:
             raise HTTPException(409, "It is not your turn.")
+        if g.get("question"):
+            raise HTTPException(409, "Answer the training question first.")
 
         move = _parse_move(board, body.move)
         if move is None:
@@ -338,6 +473,34 @@ def make_move(game_id: str, body: MoveIn, show: str = "p", _=Depends(require_aut
         board.push(move)
         _do_engine_reply(g)
         return _state(game_id, show)
+
+
+@app.post("/api/games/{game_id}/answer")
+def answer_question(game_id: str, body: AnswerIn, show: str = "p",
+                    _=Depends(require_auth)):
+    with _lock:
+        if game_id not in _games:
+            raise HTTPException(404, "No such game.")
+        g = _games[game_id]
+        q = g.get("question")
+        if not q:
+            raise HTTPException(409, "No question is pending.")
+
+        correct = _check_answer(q, body)
+
+        s = g["score"]
+        s["asked"] += 1
+        s["correct"] += int(correct)
+        s["streak"] = s["streak"] + 1 if correct else 0
+        s["best"] = max(s["best"], s["streak"])
+        t = s["types"].setdefault(q["type"], {"asked": 0, "correct": 0})
+        t["asked"] += 1
+        t["correct"] += int(correct)
+
+        g["prev_question"] = q
+        g["question"] = None
+
+        return {**_state(game_id, show), "answered": {"correct": correct}}
 
 
 @app.get("/api/games/{game_id}/pgn", response_class=PlainTextResponse)
