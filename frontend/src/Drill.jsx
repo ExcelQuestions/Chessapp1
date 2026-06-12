@@ -15,7 +15,7 @@ const LEGEND = [
 
 export default function Drill({ colour, level, onError }) {
   const [phase, setPhase] = useState('idle') // idle|busy|memorize|paint|result
-  const [seconds, setSeconds] = useState(10)
+  const [seconds, setSeconds] = useState(30)
   const [left, setLeft] = useState(0)
   const [drill, setDrill] = useState(null)
   const [paint, setPaint] = useState({}) // square -> 'y'|'t'|'c'
@@ -83,10 +83,12 @@ export default function Drill({ colour, level, onError }) {
           <label>
             Look time
             <select value={seconds} onChange={(e) => setSeconds(Number(e.target.value))}>
-              <option value="5">5s</option>
               <option value="10">10s</option>
               <option value="20">20s</option>
               <option value="30">30s</option>
+              <option value="45">45s</option>
+              <option value="60">60s</option>
+              <option value="90">90s</option>
             </select>
           </label>
           <button className="primary" onClick={begin}>Begin drill</button>
@@ -99,6 +101,11 @@ export default function Drill({ colour, level, onError }) {
         <>
           <div className="drill-count">{left}</div>
           <Board cells={drill.cells} humanColor={drill.human_color} disabled />
+          <div className="drill-actions">
+            <button className="key key-submit" onClick={() => setPhase('paint')}>
+              I'm ready — paint now ({drill.reveal_seconds - left}s used)
+            </button>
+          </div>
         </>
       )}
 

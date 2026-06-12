@@ -170,7 +170,7 @@ class AnswerIn(BaseModel):
 
 class NewDrill(BaseModel):
     colour: str = Field("random", pattern="^(white|black|random)$")
-    seconds: int = Field(10, ge=3, le=60)
+    seconds: int = Field(30, ge=3, le=120)
     level: int = Field(10, ge=0, le=20)
 
 
