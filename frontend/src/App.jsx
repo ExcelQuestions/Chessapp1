@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import Board from './Board'
 import Drill from './Drill'
+import Guide from './Guide'
 import Login from './Login'
 import MoveKeypad from './MoveKeypad'
 import Question from './Question'
@@ -209,40 +210,45 @@ export default function App() {
       </header>
 
       <section className="controls">
-        <label>
-          Level <strong>{level}</strong>
-          <input
-            type="range"
-            min="0"
-            max="20"
-            value={level}
-            onChange={(e) => setLevel(Number(e.target.value))}
-          />
-        </label>
-        <label>
-          Play as
-          <select value={colour} onChange={(e) => setColour(e.target.value)}>
-            <option value="white">White</option>
-            <option value="black">Black</option>
-            <option value="random">Random</option>
-          </select>
-        </label>
+        {mode !== 'guide' && (
+          <>
+            <label>
+              Level <strong>{level}</strong>
+              <input
+                type="range"
+                min="0"
+                max="20"
+                value={level}
+                onChange={(e) => setLevel(Number(e.target.value))}
+              />
+            </label>
+            <label>
+              Play as
+              <select value={colour} onChange={(e) => setColour(e.target.value)}>
+                <option value="white">White</option>
+                <option value="black">Black</option>
+                <option value="random">Random</option>
+              </select>
+            </label>
+          </>
+        )}
         <label>
           Mode
           <select value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="play">Play</option>
             <option value="train">Training</option>
             <option value="drill">Glimpse drill</option>
+            <option value="guide">Pressure guide</option>
           </select>
         </label>
-        {mode !== 'drill' && (
+        {mode !== 'drill' && mode !== 'guide' && (
           <button className="primary" onClick={start} disabled={busy}>
             {game ? 'New game' : 'Start'}
           </button>
         )}
       </section>
 
-      {mode !== 'drill' && <section className="visibility">
+      {mode !== 'drill' && mode !== 'guide' && <section className="visibility">
         <span className="vis-label">Show:</span>
         {TYPES.map(([t, label]) => (
           <label key={t} className="vis-item">
@@ -267,6 +273,8 @@ export default function App() {
       {error && <div className="error">{error}</div>}
 
       {mode === 'drill' && <Drill colour={colour} level={level} onError={fail} />}
+
+      {mode === 'guide' && <Guide />}
 
       {mode !== 'drill' && game && (
         <main className="game">

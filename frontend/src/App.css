@@ -369,6 +369,38 @@ button.primary:disabled {
 .drill-score { font-size: 1.05rem; color: #c7d0dc; }
 .drill-score strong { color: #ffd34d; font-size: 1.3rem; }
 
+/* ----- pressure guide ----- */
+.guide {
+  max-width: 640px;
+  margin-top: 22px;
+  line-height: 1.55;
+  color: #d4dbe5;
+}
+.guide h2 { margin: 0 0 12px; font-size: 1.4rem; color: #e7ecf3; }
+.guide h3 { margin: 22px 0 6px; font-size: 1.05rem; color: #8fb4ff; }
+.guide p { margin: 0 0 10px; }
+.guide ul { margin: 0 0 10px; padding-left: 4px; list-style: none; }
+.guide ul li { margin: 0 0 8px; }
+.guide-key li { display: flex; align-items: baseline; gap: 9px; }
+.guide-aside {
+  padding: 10px 14px;
+  background: #161b24;
+  border-left: 3px solid #2d3645;
+  border-radius: 4px;
+  color: #b5bfcc;
+  font-size: 0.92rem;
+}
+.guide-swatch {
+  position: static;
+  display: inline-block;
+  width: 26px;
+  height: 26px;
+  border-radius: 5px;
+  flex: none;
+  align-self: center;
+}
+.guide-neutral { border: 1px solid #2d3645; background: transparent; }
+
 .square .wrongmark {
   position: absolute;
   inset: 0;
