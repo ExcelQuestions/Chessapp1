@@ -105,12 +105,33 @@ export default function Drill({ colour, level, onError }) {
     <main className="drill">
       {phase === 'idle' && (
         <div className="drill-intro">
-          <p>
-            A position is revealed in three stages — pawns first, then the full
-            board, then pieces only — and then vanishes. From memory, mark every
-            square that holds a piece with who owns it: blue yours, red theirs,
-            amber an even trade. Empty squares aren’t scored — it’s the pieces
-            and their safety you’re recalling.
+          <h3>Glimpse drill</h3>
+          <p className="drill-lead">
+            Rebuild the position from memory — not as a list of squares, but as
+            pieces and how safe each one is. It’s the skill that separates strong
+            players: they remember a position by its structure, not its
+            coordinates.
+          </p>
+          <ol className="drill-steps">
+            <li>
+              <strong>Watch.</strong> A position appears in three stages — pawns
+              first, then the full board, then pieces only — then vanishes.
+            </li>
+            <li>
+              <strong>Paint.</strong> On a blank board, mark every square you
+              remember a piece on. Tap a square to cycle its owner:
+              <span className="legend-swatch p-y" /> yours →
+              <span className="legend-swatch p-t" /> theirs →
+              <span className="legend-swatch p-c" /> even trade → clear.
+            </li>
+            <li>
+              <strong>Check.</strong> You’ll see the real position with the true
+              owners, and a ✗ on every square you got wrong.
+            </li>
+          </ol>
+          <p className="drill-note">
+            The board is blank on purpose — you’re recalling <em>where</em> the
+            pieces are as well as their safety. Only occupied squares are scored.
           </p>
           <label>
             Look time
@@ -164,6 +185,9 @@ export default function Drill({ colour, level, onError }) {
             </span>
             <span className="drill-hint">mark each piece’s square · tap cycles · tap again to clear</span>
           </div>
+          <p className="drill-note">
+            Blank on purpose — place every piece you remember and colour it.
+          </p>
           <Board cells={{}} humanColor={drill.human_color} pressure={paintMap} onSquareClick={tap} />
           <div className="drill-actions">
             <button className="key key-back" onClick={() => setPaint({})} disabled={!Object.keys(paint).length}>
@@ -183,6 +207,11 @@ export default function Drill({ colour, level, onError }) {
             {result.score.missed} missed, {result.score.phantom} phantom
             {result.score.phantom === 1 ? ' mark' : ' marks'}
           </div>
+          <p className="drill-note">
+            <em>Missed</em> = a piece you didn’t mark or coloured wrong.{' '}
+            <em>Phantom</em> = a mark on a square with no piece. Squares with a ✗
+            are the ones to look at.
+          </p>
           <Board
             cells={result.cells}
             humanColor={result.human_color}
