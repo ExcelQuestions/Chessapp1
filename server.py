@@ -347,9 +347,11 @@ def _square_pressure(board, sq, human):
     return ("y" if mine else "t", _bucket(-forced))
 
 
-def _pressure_map(board, human):
+def _pressure_map(board, human, occupied_only=False):
     out = {}
     for sq in chess.SQUARES:
+        if occupied_only and board.piece_at(sq) is None:
+            continue
         r = _square_pressure(board, sq, human)
         if r:
             out[chess.square_name(sq)] = {"o": r[0], "i": r[1]}
@@ -751,7 +753,11 @@ def create_drill(body: NewDrill, _=Depends(require_auth)):
         _drills[drill_id] = {
             "board": board,
             "human": human,
-            "truth": _pressure_map(board, human),
+            # Occupied squares only: the recall target is the pieces and each
+            # one's status (yours-safe / theirs / hanging), which is what chess
+            # memory is actually built from — not a uniform survey of every
+            # empty square's control.
+            "truth": _pressure_map(board, human, occupied_only=True),
             "done": False,
         }
     return {

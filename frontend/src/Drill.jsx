@@ -107,8 +107,10 @@ export default function Drill({ colour, level, onError }) {
         <div className="drill-intro">
           <p>
             A position is revealed in three stages — pawns first, then the full
-            board, then pieces only — and then vanishes. Paint who owns each
-            square from memory: blue yours, red theirs, amber contested.
+            board, then pieces only — and then vanishes. From memory, mark every
+            square that holds a piece with who owns it: blue yours, red theirs,
+            amber an even trade. Empty squares aren’t scored — it’s the pieces
+            and their safety you’re recalling.
           </p>
           <label>
             Look time
@@ -160,7 +162,7 @@ export default function Drill({ colour, level, onError }) {
                 </span>
               ))}
             </span>
-            <span className="drill-hint">tap cycles · tap again to clear</span>
+            <span className="drill-hint">mark each piece’s square · tap cycles · tap again to clear</span>
           </div>
           <Board cells={{}} humanColor={drill.human_color} pressure={paintMap} onSquareClick={tap} />
           <div className="drill-actions">
