@@ -255,11 +255,21 @@ def _attacker_vals(board, color, sq):
                   for a in board.attackers(color, sq))
 
 
+_KING_VAL = _VAL[chess.KING]
+
+
 def _exchange(target_val, attackers, defenders):
     """Material won by the side of `attackers` initiating captures on a piece
     worth `target_val`, both sides swapping cheapest-first and free to stop
-    (stand pat) whenever continuing loses material."""
+    (stand pat) whenever continuing loses material.
+
+    A king may only capture when the opponent has no attacker left to answer:
+    capturing into a square the opponent still covers would be moving into
+    check, which is illegal. So if the cheapest remaining captor is the king
+    and the other side can still recapture, this side simply cannot continue."""
     if not attackers:
+        return 0
+    if attackers[0] == _KING_VAL and defenders:
         return 0
     return max(0, target_val - _exchange(attackers[0], defenders, attackers[1:]))
 

@@ -47,12 +47,12 @@ export default function Board({ cells, humanColor, selected, marked = [], pressu
                 {pressure[name] && (
                   <span className={`tint p-${pressure[name].o} i${pressure[name].i}`} />
                 )}
-                {wrong.includes(name) && <span className="wrongmark">✗</span>}
                 {symbol && (
                   <span className={'piece ' + (isWhitePiece ? 'white' : 'black')}>
                     {GLYPH[symbol]}
                   </span>
                 )}
+                {wrong.includes(name) && <span className="wrongmark">✗</span>}
                 <span className="coord">{name}</span>
               </button>
             )

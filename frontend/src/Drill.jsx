@@ -13,6 +13,35 @@ const LEGEND = [
   ['p-c', 'Contested'],
 ]
 
+const isPawn = (sym) => sym && sym.toLowerCase() === 'p'
+
+// Staged reveal, grounded in how chess memory actually forms. Pawns are the
+// structural skeleton experts chunk around, so we show them first to prime the
+// frame (a pretraining effect — less load when the pieces arrive). The long
+// middle phase is the real work: placing pieces onto that frame. The short
+// final phase pulls the pawns away, forcing you to hold their structure from
+// memory while the harder-to-recall pieces get the recency boost.
+const STAGE = {
+  pawns:  ['Pawn skeleton', 'Fix the pawn structure — the frame everything hangs on.'],
+  full:   ['Full position', 'Place the pieces onto the pawn frame.'],
+  pieces: ['Pieces only', 'Pawns gone — hold their structure in your mind.'],
+}
+
+// Phase boundaries: first 30% pawns, middle 60% full, final 10% pieces.
+function glimpseStage(elapsed, total) {
+  if (elapsed < total * 0.3) return 'pawns'
+  if (elapsed < total * 0.9) return 'full'
+  return 'pieces'
+}
+
+function stageCells(cells, stage) {
+  if (stage === 'full') return cells
+  return Object.fromEntries(
+    Object.entries(cells).filter(([, sym]) =>
+      stage === 'pawns' ? isPawn(sym) : !isPawn(sym))
+  )
+}
+
 export default function Drill({ colour, level, onError }) {
   const [phase, setPhase] = useState('idle') // idle|busy|memorize|paint|result
   const [seconds, setSeconds] = useState(30)
@@ -77,8 +106,9 @@ export default function Drill({ colour, level, onError }) {
       {phase === 'idle' && (
         <div className="drill-intro">
           <p>
-            A position appears for a few seconds, then vanishes. Paint who owns
-            each square from memory — blue yours, red theirs, amber contested.
+            A position is revealed in three stages — pawns first, then the full
+            board, then pieces only — and then vanishes. Paint who owns each
+            square from memory: blue yours, red theirs, amber contested.
           </p>
           <label>
             Look time
@@ -97,17 +127,28 @@ export default function Drill({ colour, level, onError }) {
 
       {phase === 'busy' && <p className="placeholder">Working…</p>}
 
-      {phase === 'memorize' && drill && (
-        <>
-          <div className="drill-count">{left}</div>
-          <Board cells={drill.cells} humanColor={drill.human_color} disabled />
-          <div className="drill-actions">
-            <button className="key key-submit" onClick={() => setPhase('paint')}>
-              I'm ready — paint now ({drill.reveal_seconds - left}s used)
-            </button>
-          </div>
-        </>
-      )}
+      {phase === 'memorize' && drill && (() => {
+        const total = drill.reveal_seconds
+        const stage = glimpseStage(total - left, total)
+        const [label, caption] = STAGE[stage]
+        return (
+          <>
+            <div className="drill-stagebar">
+              <span className="drill-count">{left}</span>
+              <span className="drill-stage">
+                <strong>{label}</strong>
+                <span className="drill-caption">{caption}</span>
+              </span>
+            </div>
+            <Board cells={stageCells(drill.cells, stage)} humanColor={drill.human_color} disabled />
+            <div className="drill-actions">
+              <button className="key key-submit" onClick={() => setPhase('paint')}>
+                I'm ready — paint now ({total - left}s used)
+              </button>
+            </div>
+          </>
+        )
+      })()}
 
       {phase === 'paint' && drill && (
         <>
