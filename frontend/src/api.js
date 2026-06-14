@@ -90,6 +90,42 @@ export function paintDrill(drillId, paint) {
   }).then(handle)
 }
 
+// Sonar: the integrated board-vision curriculum. A session runs reps, each
+// cycling one position through glimpse -> recall -> read -> play.
+export function sonarStart({ tier, level }) {
+  return fetch('/api/sonar', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ tier, level }),
+  }).then(handle)
+}
+export function sonarNext(sid) {
+  return fetch(`/api/sonar/${sid}/next`, {
+    method: 'POST', headers: authHeaders(),
+  }).then(handle)
+}
+export function sonarRecall(sid, paint) {
+  return fetch(`/api/sonar/${sid}/recall`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ paint }),
+  }).then(handle)
+}
+export function sonarAnswer(sid, payload) {
+  return fetch(`/api/sonar/${sid}/answer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify(payload),
+  }).then(handle)
+}
+export function sonarMove(sid, move) {
+  return fetch(`/api/sonar/${sid}/move`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: JSON.stringify({ move }),
+  }).then(handle)
+}
+
 // Tap-for-detail on a square when the pressure overlay is on: attacker counts
 // and the exchange verdict in pawn units.
 export function pressureDetail(gameId, square) {

@@ -420,6 +420,37 @@ button.primary:disabled {
 .drill-score { font-size: 1.05rem; color: #c7d0dc; }
 .drill-score strong { color: #ffd34d; font-size: 1.3rem; }
 
+/* ----- sonar ----- */
+.sonar { margin-top: 22px; display: flex; flex-direction: column; gap: 14px; align-items: flex-start; }
+.sonar h2 { margin: 0; font-size: 1.4rem; color: #e7ecf3; }
+.sonar-lead { margin: 0; max-width: 620px; line-height: 1.55; color: #c7d0dc; }
+.sonar-phases {
+  margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 6px;
+  color: #c7d0dc; line-height: 1.5;
+}
+.sonar-phases strong { color: #8fb4ff; }
+.sonar-opts { display: flex; gap: 22px; flex-wrap: wrap; align-items: center; }
+.sonar-opts label { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+.sonar-bar {
+  display: flex; gap: 16px; font-size: 0.9rem; color: #9aa4b2; font-weight: 600;
+  padding: 6px 0; border-bottom: 1px solid #1c2330; width: 100%;
+}
+.sonar-prompt { margin: 0; font-weight: 600; color: #e7ecf3; }
+.sonar-sub { margin: 0; font-size: 0.85rem; color: #9aa4b2; }
+.sonar-verdict {
+  padding: 8px 14px; border-radius: 8px; background: #161b24;
+  border-left: 4px solid #2d3645;
+}
+.sonar-verdict code { background: #11151c; padding: 1px 6px; border-radius: 4px; }
+.sonar-verdict.v-100 { border-left-color: #6fd18f; }
+.sonar-verdict.v-80  { border-left-color: #8fd18f; }
+.sonar-verdict.v-55  { border-left-color: #ffd34d; }
+.sonar-verdict.v-30  { border-left-color: #ff9f5a; }
+.sonar-verdict.v-0   { border-left-color: #ff5a5a; }
+.sonar-repscore { font-size: 0.9rem; color: #c7d0dc; }
+.tier-up { color: #6fd18f; font-weight: 600; }
+.tier-down { color: #ff9f5a; font-weight: 600; }
+
 /* ----- pressure guide ----- */
 .guide {
   max-width: 640px;

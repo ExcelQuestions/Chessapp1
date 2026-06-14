@@ -2,6 +2,7 @@ import { useState } from 'react'
 import Board from './Board'
 import Drill from './Drill'
 import Guide from './Guide'
+import Sonar from './Sonar'
 import Login from './Login'
 import MoveKeypad from './MoveKeypad'
 import Question from './Question'
@@ -243,7 +244,7 @@ export default function App() {
       </header>
 
       <section className="controls">
-        {mode !== 'guide' && (
+        {mode !== 'guide' && mode !== 'sonar' && (
           <>
             <label>
               Level <strong>{level}</strong>
@@ -272,10 +273,11 @@ export default function App() {
             <option value="train">Training</option>
             <option value="exo">Exoskeleton</option>
             <option value="drill">Glimpse drill</option>
+            <option value="sonar">Sonar (full method)</option>
             <option value="guide">Pressure guide</option>
           </select>
         </label>
-        {mode !== 'drill' && mode !== 'guide' && (
+        {mode !== 'drill' && mode !== 'guide' && mode !== 'sonar' && (
           <button className="primary" onClick={start} disabled={busy}>
             {game ? 'New game' : 'Start'}
           </button>
@@ -367,6 +369,8 @@ export default function App() {
       {error && <div className="error">{error}</div>}
 
       {mode === 'drill' && <Drill colour={colour} level={level} onError={fail} />}
+
+      {mode === 'sonar' && <Sonar onError={fail} />}
 
       {mode === 'guide' && <Guide />}
 
@@ -461,7 +465,7 @@ export default function App() {
         </main>
       )}
 
-      {mode !== 'drill' && !game && !error && (
+      {(mode === 'play' || mode === 'train' || mode === 'exo') && !game && !error && (
         <p className="placeholder">
           Choose what to show, pick a level and colour, then press Start.
         </p>

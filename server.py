@@ -142,6 +142,10 @@ _MAX_GAMES = 50
 _drills: dict = {}
 _MAX_DRILLS = 50
 
+# Sonar sessions: the integrated curriculum (glimpse -> recall -> read -> play).
+_sonar: dict = {}
+_MAX_SONAR = 50
+
 
 # --------------------------------------------------------------------------- #
 # Request bodies
@@ -178,6 +182,15 @@ class NewDrill(BaseModel):
 class PaintIn(BaseModel):
     """User's painted territory map: square name -> 'y' | 't' | 'c'."""
     paint: dict[str, str] = Field(..., max_length=64)
+
+
+class NewSonar(BaseModel):
+    tier: int = Field(2, ge=1, le=5)
+    level: int = Field(6, ge=0, le=20)
+
+
+class SonarMove(BaseModel):
+    move: str = Field(..., min_length=2, max_length=10)
 
 
 class Login(BaseModel):
@@ -876,6 +889,208 @@ def pressure_detail(game_id: str, square: str, _=Depends(require_auth)):
                     info["verdict"] = (f"Capturing here would lose {who} "
                                        f"{-forced} pawn{'s' if forced != -1 else ''}.")
         return info
+
+
+# --------------------------------------------------------------------------- #
+# Sonar: the integrated board-vision curriculum. Each rep runs one position
+# through four phases — Glimpse (encode), Recall (paint from memory), Read
+# (one relational question), Play (find a strong move, engine-scored) — then
+# reveals the truth and adapts difficulty toward the ~75-85% success band.
+#
+# Solo training, so the blindfold is on the user's honour: the browser holds
+# the position from the glimpse and simply doesn't render it. Scoring stays
+# server-side so progress is measured against ground truth, not self-report.
+# --------------------------------------------------------------------------- #
+_SONAR_LOOK = {1: 40, 2: 30, 3: 20, 4: 14, 5: 9}  # look seconds by tier
+
+
+def _sonar_question(board, human):
+    """A single relational question for the Read phase (never a paint round —
+    Recall already covers that). Reuses the game quiz generator."""
+    pseudo = {"board": board, "human": human, "last_engine": None,
+              "prev_question": None, "score": {"asked": 0}}
+    return _gen_question(pseudo)
+
+
+def _build_sonar_rep(tier, gen_level, rep_no):
+    """Generate one rep. Engine work (position playout) happens here, off-lock.
+    Returns (current_state, client_payload)."""
+    board = _drill_position(gen_level)
+    human = board.turn  # always your move, so the Play phase is yours
+    q = _sonar_question(board, human)
+    current = {
+        "board": board,
+        "human": human,
+        "truth": _pressure_map(board, human, occupied_only=True),
+        "question": q,
+        "recall": None,   # pct once submitted
+        "answer": None,   # bool once submitted
+    }
+    payload = {
+        "rep": rep_no,
+        "tier": tier,
+        "reveal_seconds": _SONAR_LOOK.get(tier, 20),
+        "cells": _visible_map(board, ALL_TYPES),
+        "human_color": "w" if human == chess.WHITE else "b",
+        "question": {"text": q["text"], "format": q["format"]},
+    }
+    return current, payload
+
+
+def _move_quality(board, move, level):
+    """Compare the user's move to the engine's best by centipawn loss."""
+    engine = chess.engine.SimpleEngine.popen_uci(ENGINE_PATH)
+    try:
+        try:
+            engine.configure({"Threads": 1})
+        except chess.engine.EngineError:
+            pass
+        side = board.turn
+        limit = chess.engine.Limit(time=0.2)
+        info0 = engine.analyse(board, limit)
+        best = info0["pv"][0]
+        s_best = info0["score"].pov(side).score(mate_score=100000)
+        best_san = board.san(best)
+
+        board.push(move)
+        try:
+            s_after = engine.analyse(board, limit)["score"].pov(side).score(
+                mate_score=100000)
+        finally:
+            board.pop()
+    finally:
+        engine.quit()
+
+    cp_loss = max(0, s_best - s_after)
+    if move == best or cp_loss <= 15:
+        verdict, qual = "Best move", 100
+    elif cp_loss <= 40:
+        verdict, qual = "Good", 80
+    elif cp_loss <= 90:
+        verdict, qual = "Inaccuracy", 55
+    elif cp_loss <= 200:
+        verdict, qual = "Mistake", 30
+    else:
+        verdict, qual = "Blunder", 0
+    return {
+        "verdict": verdict, "quality": qual, "cp_loss": cp_loss,
+        "best": {"from": chess.square_name(best.from_square),
+                 "to": chess.square_name(best.to_square), "san": best_san},
+    }
+
+
+@app.post("/api/sonar")
+def sonar_start(body: NewSonar, _=Depends(require_auth)):
+    if ENGINE_PATH is None:
+        raise HTTPException(503, "Stockfish engine not found on the server.")
+    current, payload = _build_sonar_rep(body.tier, body.level, 1)
+    sid = uuid.uuid4().hex[:12]
+    with _lock:
+        if len(_sonar) >= _MAX_SONAR:
+            del _sonar[next(iter(_sonar))]
+        _sonar[sid] = {
+            "tier": body.tier, "rep": 1, "gen_level": body.level,
+            "history": [], "current": current,
+        }
+    return {"session_id": sid, **payload}
+
+
+@app.post("/api/sonar/{sid}/next")
+def sonar_next(sid: str, _=Depends(require_auth)):
+    with _lock:
+        if sid not in _sonar:
+            raise HTTPException(404, "No such session.")
+        tier, level = _sonar[sid]["tier"], _sonar[sid]["gen_level"]
+        rep_no = _sonar[sid]["rep"] + 1
+    # Engine playout off-lock.
+    current, payload = _build_sonar_rep(tier, level, rep_no)
+    with _lock:
+        if sid not in _sonar:
+            raise HTTPException(404, "No such session.")
+        _sonar[sid]["rep"] = rep_no
+        _sonar[sid]["current"] = current
+    return {"session_id": sid, **payload}
+
+
+@app.post("/api/sonar/{sid}/recall")
+def sonar_recall(sid: str, body: PaintIn, _=Depends(require_auth)):
+    with _lock:
+        if sid not in _sonar or not _sonar[sid]["current"]:
+            raise HTTPException(404, "No active rep.")
+        cur = _sonar[sid]["current"]
+        score, wrong = _paint_score(cur["truth"], _norm_paint(body.paint))
+        cur["recall"] = score["pct"]
+        # Recall feedback stays score-only mid-rep; the full map is revealed in
+        # the Play phase so it can't pre-answer the Read question.
+        return {"score": score}
+
+
+@app.post("/api/sonar/{sid}/answer")
+def sonar_answer(sid: str, body: AnswerIn, _=Depends(require_auth)):
+    with _lock:
+        if sid not in _sonar or not _sonar[sid]["current"]:
+            raise HTTPException(404, "No active rep.")
+        cur = _sonar[sid]["current"]
+        q = cur["question"]
+        if q["format"] == "paint":
+            pscore, _w = _paint_score(q["truth"], _norm_paint(body.paint or {}))
+            correct = pscore["pct"] >= 80
+        else:
+            correct = _check_answer(q, body)
+        cur["answer"] = bool(correct)
+        return {"correct": bool(correct)}
+
+
+@app.post("/api/sonar/{sid}/move")
+def sonar_move(sid: str, body: SonarMove, _=Depends(require_auth)):
+    with _lock:
+        if sid not in _sonar or not _sonar[sid]["current"]:
+            raise HTTPException(404, "No active rep.")
+        cur = _sonar[sid]["current"]
+        board, human = cur["board"], cur["human"]
+        move = _parse_move(board, body.move)
+        if move is None:
+            raise HTTPException(422, "Couldn't read that move.")
+        if move not in board.legal_moves:
+            raise HTTPException(422, "Illegal move.")
+        level = _sonar[sid]["gen_level"]
+
+        mq = _move_quality(board, move, level)
+
+        # Composite rep score: recall + read + play, equally weighted.
+        recall = cur["recall"] if cur["recall"] is not None else 0
+        read = 100 if cur["answer"] else 0
+        composite = round((recall + read + mq["quality"]) / 3)
+
+        # Adaptive staircase: tighten when strong, ease when struggling.
+        old_tier = _sonar[sid]["tier"]
+        tier = old_tier
+        if composite >= 82:
+            tier = min(5, old_tier + 1)
+        elif composite <= 50:
+            tier = max(1, old_tier - 1)
+        _sonar[sid]["tier"] = tier
+        _sonar[sid]["history"].append({
+            "rep": _sonar[sid]["rep"], "recall": recall, "read": read,
+            "move": mq["quality"], "composite": composite,
+        })
+        hist = _sonar[sid]["history"]
+        avg = round(sum(h["composite"] for h in hist) / len(hist))
+        played_san = board.san(move)
+        cur_done = dict(cur)
+        _sonar[sid]["current"] = None  # rep consumed
+
+    return {
+        "move": {**mq, "played": played_san},
+        "rep_score": {"recall": recall, "read": read, "move": mq["quality"],
+                      "composite": composite},
+        "tier": tier, "tier_changed": tier - old_tier,
+        "session_avg": avg, "reps_done": len(hist),
+        # Reveal the truth for prediction-error feedback.
+        "cells": _visible_map(cur_done["board"], ALL_TYPES),
+        "pressure": _pressure_map(cur_done["board"], human),
+        "human_color": "w" if human == chess.WHITE else "b",
+    }
 
 
 @app.get("/api/games/{game_id}/pgn", response_class=PlainTextResponse)
