@@ -151,7 +151,7 @@ class NewGame(BaseModel):
     colour: str = Field("white", pattern="^(white|black|random)$")
     think_time: float = Field(0.5, gt=0, le=5)
     show: str = Field("p", max_length=6)
-    mode: str = Field("play", pattern="^(play|train)$")
+    mode: str = Field("play", pattern="^(play|train|exo)$")
     pressure: bool = False
 
 
@@ -359,6 +359,42 @@ def _pressure_map(board, human, occupied_only=False):
 
 
 # --------------------------------------------------------------------------- #
+# Exoskeleton: full blindfold, but the legal moves of every piece are shown as
+# arrows. You read the position from its mobility instead of its pieces.
+# --------------------------------------------------------------------------- #
+def _move_arrows(board, human):
+    """Every piece's available moves as {from, to, side}: 'y' for the human's
+    pieces, 't' for the engine's. Both sides are sent; the client filters.
+    Promotions collapse to a single arrow per from/to."""
+    seen = set()
+    arrows = []
+
+    def add(moves, color):
+        side = "y" if color == human else "t"
+        for m in moves:
+            key = (m.from_square, m.to_square, side)
+            if key in seen:
+                continue
+            seen.add(key)
+            arrows.append({
+                "from": chess.square_name(m.from_square),
+                "to": chess.square_name(m.to_square),
+                "side": side,
+            })
+
+    add(board.legal_moves, board.turn)
+    # The side not to move has no "legal" moves; a null move flips the turn so
+    # we can read theirs too. Illegal while in check, so skip it then.
+    if not board.is_check():
+        board.push(chess.Move.null())
+        try:
+            add(board.legal_moves, board.turn)
+        finally:
+            board.pop()
+    return arrows
+
+
+# --------------------------------------------------------------------------- #
 # Relation training: quiz questions generated from the attack graph.
 # The truth never leaves the server, so answering is the only way to find out.
 # --------------------------------------------------------------------------- #
@@ -517,6 +553,9 @@ def _state(game_id, show="p", pressure=False):
     # answer "which of your pieces are hanging?" at a glance.
     if pressure and not (g.get("mode") == "train" and g.get("question") and not over):
         out["pressure"] = _pressure_map(board, g["human"])
+    if g.get("mode") == "exo":
+        out["mode"] = "exo"
+        out["arrows"] = [] if over else _move_arrows(board, g["human"])
     return out
 
 

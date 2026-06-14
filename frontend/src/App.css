@@ -142,6 +142,7 @@ button.primary:disabled {
   overflow-x: auto;
 }
 .board {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(8, var(--sq));
   grid-template-rows: repeat(8, var(--sq));
@@ -149,6 +150,21 @@ button.primary:disabled {
   border-radius: 6px;
   overflow: hidden;
 }
+
+/* Exoskeleton move arrows: overlay the whole board, clicks pass through. */
+.arrows {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 3;
+}
+.arrow { fill: none; stroke-linecap: round; }
+.arrow.a-y { stroke: #4f8cff; stroke-width: 0.10; stroke-opacity: 0.9; }
+.arrow.a-t { stroke: #ff5a5a; stroke-width: 0.07; stroke-opacity: 0.6; }
+.arrowhead.a-y { fill: #4f8cff; fill-opacity: 0.9; }
+.arrowhead.a-t { fill: #ff5a5a; fill-opacity: 0.6; }
 .square {
   position: relative;
   border: none;
@@ -288,6 +304,17 @@ button.primary:disabled {
   color: #c7d0dc;
 }
 .vis-pressure { font-weight: 600; color: #8fb4ff; }
+
+.exo-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin: 0 3px 0 1px;
+  vertical-align: -1px;
+}
+.exo-you { background: #4f8cff; }
+.exo-them { background: #ff5a5a; }
 .answer-ok, .answer-bad {
   padding: 6px 12px;
   border-radius: 8px;

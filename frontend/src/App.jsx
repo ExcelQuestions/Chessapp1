@@ -36,6 +36,7 @@ export default function App() {
   const [lastAnswer, setLastAnswer] = useState(null) // {correct, pct?} of last quiz answer
   const [pressureOn, setPressureOn] = useState(false)
   const [detail, setDetail] = useState(null) // tap-for-detail text
+  const [arrowView, setArrowView] = useState('both') // exoskeleton: y | t | both
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   // Which piece types are visible. Default = classic blindfold (pawns only).
@@ -44,6 +45,7 @@ export default function App() {
   })
 
   const show = showString(visible)
+  const exo = mode === 'exo'
 
   // Centralised error handling: an expired/invalid token drops us to login.
   function fail(e) {
@@ -69,7 +71,13 @@ export default function App() {
     setDetail(null)
     setBusy(true)
     try {
-      setGame(await newGame({ level, colour, thinkTime: 0.5, show, mode, pressure: pressureOn }))
+      // Exoskeleton is full blindfold: no piece glyphs, just the move arrows.
+      setGame(await newGame({
+        level, colour, thinkTime: 0.5,
+        show: exo ? '' : show,
+        mode,
+        pressure: exo ? false : pressureOn,
+      }))
     } catch (e) {
       fail(e)
     } finally {
@@ -111,7 +119,7 @@ export default function App() {
     setError(null)
     setBusy(true)
     try {
-      setGame(await sendMove(game.game_id, move, show || '-', pressureOn))
+      setGame(await sendMove(game.game_id, move, exo ? '-' : (show || '-'), exo ? false : pressureOn))
       setSelected(null)
       setTyped('')
       setLastAnswer(null)
@@ -237,6 +245,7 @@ export default function App() {
           <select value={mode} onChange={(e) => setMode(e.target.value)}>
             <option value="play">Play</option>
             <option value="train">Training</option>
+            <option value="exo">Exoskeleton</option>
             <option value="drill">Glimpse drill</option>
             <option value="guide">Pressure guide</option>
           </select>
@@ -248,7 +257,7 @@ export default function App() {
         )}
       </section>
 
-      {mode !== 'drill' && mode !== 'guide' && <section className="visibility">
+      {(mode === 'play' || mode === 'train') && <section className="visibility">
         <span className="vis-label">Show:</span>
         {TYPES.map(([t, label]) => (
           <label key={t} className="vis-item">
@@ -270,6 +279,27 @@ export default function App() {
         </span>
       </section>}
 
+      {exo && (
+        <section className="visibility exo-controls">
+          <span className="vis-label">Arrows:</span>
+          <label className="vis-item">
+            <input type="radio" name="arrowview" checked={arrowView === 'y'}
+              onChange={() => setArrowView('y')} />
+            <span className="exo-dot exo-you" /> Yours
+          </label>
+          <label className="vis-item">
+            <input type="radio" name="arrowview" checked={arrowView === 't'}
+              onChange={() => setArrowView('t')} />
+            <span className="exo-dot exo-them" /> Opponent
+          </label>
+          <label className="vis-item">
+            <input type="radio" name="arrowview" checked={arrowView === 'both'}
+              onChange={() => setArrowView('both')} />
+            Both
+          </label>
+        </section>
+      )}
+
       {error && <div className="error">{error}</div>}
 
       {mode === 'drill' && <Drill colour={colour} level={level} onError={fail} />}
@@ -287,6 +317,11 @@ export default function App() {
               question && question.format === 'paint'
                 ? Object.fromEntries(Object.entries(qpaint).map(([sq, o]) => [sq, { o, i: 2 }]))
                 : game.pressure || {}
+            }
+            arrows={
+              exo
+                ? (game.arrows || []).filter((a) => arrowView === 'both' || a.side === arrowView)
+                : []
             }
             onSquareClick={onSquareClick}
             disabled={busy || !yourTurn || (question && !['squares', 'paint'].includes(question.format))}
