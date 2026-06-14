@@ -434,6 +434,16 @@ button.primary:disabled {
 .sonar-phases strong { color: #8fb4ff; }
 .sonar-opts { display: flex; gap: 22px; flex-wrap: wrap; align-items: center; }
 .sonar-opts label { display: flex; align-items: center; gap: 8px; font-size: 0.9rem; }
+.sonar-name {
+  padding: 7px 10px; border-radius: 8px; border: 1px solid #2d3645;
+  background: #11151c; color: #e7ecf3; font-size: 16px; width: 140px;
+}
+.sonar-stats { margin: 0; font-size: 0.9rem; color: #9aa4b2; }
+.sonar-due { color: #ffd34d; }
+.sonar-reviewbadge {
+  background: #2a3550; color: #8fb4ff; padding: 1px 8px;
+  border-radius: 10px; font-size: 0.8rem;
+}
 .sonar-bar {
   display: flex; gap: 16px; font-size: 0.9rem; color: #9aa4b2; font-weight: 600;
   padding: 6px 0; border-bottom: 1px solid #1c2330; width: 100%;

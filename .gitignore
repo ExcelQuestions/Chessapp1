@@ -22,3 +22,6 @@ dist/
 
 # Local environment — never commit real secrets
 .env
+
+# Sonar progress database (per-machine)
+sonar.db

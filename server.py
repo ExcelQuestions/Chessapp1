@@ -23,6 +23,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import sqlite3
 import sys
 import threading
 import time
@@ -146,6 +147,102 @@ _MAX_DRILLS = 50
 _sonar: dict = {}
 _MAX_SONAR = 50
 
+# Persistence (Sonar only): a SQLite file records every rep and a spaced-
+# repetition card per struggled-with position, keyed by a chosen profile name.
+# Built-in sqlite3 — no new dependency. Writes happen under _lock with the rest
+# of the Sonar mutations, so one shared connection is safe.
+_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sonar.db")
+_db = sqlite3.connect(_DB_PATH, check_same_thread=False)
+_db.row_factory = sqlite3.Row
+_db.executescript(
+    """
+    CREATE TABLE IF NOT EXISTS reps (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile TEXT NOT NULL, ts REAL NOT NULL, fen TEXT,
+        tier INTEGER, recall_pct INTEGER, read_ok INTEGER,
+        move_quality INTEGER, cp_loss INTEGER, composite INTEGER,
+        review INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS cards (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        profile TEXT NOT NULL, fen TEXT NOT NULL,
+        ease REAL DEFAULT 2.3, interval_days REAL DEFAULT 1,
+        due REAL NOT NULL, reps INTEGER DEFAULT 0, lapses INTEGER DEFAULT 0,
+        last REAL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS cards_profile_fen ON cards(profile, fen);
+    CREATE INDEX IF NOT EXISTS reps_profile ON reps(profile);
+    """
+)
+_db.commit()
+
+
+def _clean_profile(name):
+    name = (name or "").strip()[:40]
+    return name or "default"
+
+
+def _record_rep(profile, fen, tier, recall, read_ok, mq, composite, review):
+    _db.execute(
+        "INSERT INTO reps(profile,ts,fen,tier,recall_pct,read_ok,move_quality,"
+        "cp_loss,composite,review) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (profile, time.time(), fen, tier, recall, int(bool(read_ok)),
+         mq["quality"], mq["cp_loss"], composite, int(review)))
+    _db.commit()
+
+
+def _due_card(profile):
+    """The most-overdue card for this profile, or None."""
+    row = _db.execute(
+        "SELECT * FROM cards WHERE profile=? AND due<=? ORDER BY due ASC LIMIT 1",
+        (profile, time.time())).fetchone()
+    return row
+
+
+def _schedule_card(profile, fen, success, existing):
+    """SM-2-flavoured scheduling. Create or update the card for this position."""
+    now = time.time()
+    if existing is None:
+        # Only fresh positions that were handled poorly become cards.
+        if success:
+            return
+        _db.execute(
+            "INSERT OR IGNORE INTO cards(profile,fen,ease,interval_days,due,"
+            "reps,lapses,last) VALUES (?,?,?,?,?,?,?,?)",
+            (profile, fen, 2.3, 1, now + 86400, 0, 0, now))
+    else:
+        ease, interval, reps, lapses = (existing["ease"], existing["interval_days"],
+                                        existing["reps"], existing["lapses"])
+        if success:
+            reps += 1
+            interval = 1 if reps == 1 else 3 if reps == 2 else round(interval * ease)
+            ease = min(2.8, ease + 0.05)
+        else:
+            reps, lapses, interval = 0, lapses + 1, 1
+            ease = max(1.3, ease - 0.2)
+        _db.execute(
+            "UPDATE cards SET ease=?,interval_days=?,due=?,reps=?,lapses=?,last=? "
+            "WHERE id=?",
+            (ease, interval, now + interval * 86400, reps, lapses, now, existing["id"]))
+    _db.commit()
+
+
+def _profile_stats(profile):
+    r = _db.execute(
+        "SELECT COUNT(*) n, AVG(composite) c, AVG(cp_loss) cp, AVG(recall_pct) rc "
+        "FROM reps WHERE profile=?", (profile,)).fetchone()
+    due = _db.execute("SELECT COUNT(*) n FROM cards WHERE profile=? AND due<=?",
+                      (profile, time.time())).fetchone()["n"]
+    total_cards = _db.execute("SELECT COUNT(*) n FROM cards WHERE profile=?",
+                              (profile,)).fetchone()["n"]
+    return {
+        "reps": r["n"] or 0,
+        "avg_composite": round(r["c"]) if r["c"] is not None else None,
+        "avg_cp_loss": round(r["cp"]) if r["cp"] is not None else None,
+        "avg_recall": round(r["rc"]) if r["rc"] is not None else None,
+        "due": due, "cards": total_cards,
+    }
+
 
 # --------------------------------------------------------------------------- #
 # Request bodies
@@ -187,6 +284,7 @@ class PaintIn(BaseModel):
 class NewSonar(BaseModel):
     tier: int = Field(2, ge=1, le=5)
     level: int = Field(6, ge=0, le=20)
+    profile: str = Field("default", max_length=40)
 
 
 class SonarMove(BaseModel):
@@ -912,19 +1010,25 @@ def _sonar_question(board, human):
     return _gen_question(pseudo)
 
 
-def _build_sonar_rep(tier, gen_level, rep_no):
+def _build_sonar_rep(tier, gen_level, rep_no, board=None, card_id=None):
     """Generate one rep. Engine work (position playout) happens here, off-lock.
-    Returns (current_state, client_payload)."""
-    board = _drill_position(gen_level)
+    A `board` may be supplied to re-test a stored review position. Returns
+    (current_state, client_payload)."""
+    review = board is not None
+    if board is None:
+        board = _drill_position(gen_level)
     human = board.turn  # always your move, so the Play phase is yours
     q = _sonar_question(board, human)
     current = {
         "board": board,
         "human": human,
+        "fen": board.fen(),
         "truth": _pressure_map(board, human, occupied_only=True),
         "question": q,
         "recall": None,   # pct once submitted
         "answer": None,   # bool once submitted
+        "review": review,
+        "card_id": card_id,
     }
     payload = {
         "rep": rep_no,
@@ -933,8 +1037,23 @@ def _build_sonar_rep(tier, gen_level, rep_no):
         "cells": _visible_map(board, ALL_TYPES),
         "human_color": "w" if human == chess.WHITE else "b",
         "question": {"text": q["text"], "format": q["format"]},
+        "review": review,
     }
     return current, payload
+
+
+def _next_sonar_board(profile, gen_level):
+    """Decide the next position: interleave due review cards with fresh ones.
+    Returns (board_or_None, card_row_or_None) — board None means generate fresh."""
+    import random
+    with _lock:
+        card = _due_card(profile)
+    if card and random.random() < 0.5:
+        try:
+            return chess.Board(card["fen"]), card
+        except ValueError:
+            return None, None
+    return None, None
 
 
 def _move_quality(board, move, level):
@@ -983,16 +1102,19 @@ def _move_quality(board, move, level):
 def sonar_start(body: NewSonar, _=Depends(require_auth)):
     if ENGINE_PATH is None:
         raise HTTPException(503, "Stockfish engine not found on the server.")
-    current, payload = _build_sonar_rep(body.tier, body.level, 1)
+    profile = _clean_profile(body.profile)
+    board, card = _next_sonar_board(profile, body.level)
+    current, payload = _build_sonar_rep(body.tier, body.level, 1, board,
+                                        card["id"] if card else None)
     sid = uuid.uuid4().hex[:12]
     with _lock:
         if len(_sonar) >= _MAX_SONAR:
             del _sonar[next(iter(_sonar))]
         _sonar[sid] = {
             "tier": body.tier, "rep": 1, "gen_level": body.level,
-            "history": [], "current": current,
+            "profile": profile, "history": [], "current": current,
         }
-    return {"session_id": sid, **payload}
+    return {"session_id": sid, "profile": profile, **payload}
 
 
 @app.post("/api/sonar/{sid}/next")
@@ -1001,9 +1123,12 @@ def sonar_next(sid: str, _=Depends(require_auth)):
         if sid not in _sonar:
             raise HTTPException(404, "No such session.")
         tier, level = _sonar[sid]["tier"], _sonar[sid]["gen_level"]
+        profile = _sonar[sid]["profile"]
         rep_no = _sonar[sid]["rep"] + 1
-    # Engine playout off-lock.
-    current, payload = _build_sonar_rep(tier, level, rep_no)
+    # Position selection + any engine playout off-lock.
+    board, card = _next_sonar_board(profile, level)
+    current, payload = _build_sonar_rep(tier, level, rep_no, board,
+                                        card["id"] if card else None)
     with _lock:
         if sid not in _sonar:
             raise HTTPException(404, "No such session.")
@@ -1078,7 +1203,22 @@ def sonar_move(sid: str, body: SonarMove, _=Depends(require_auth)):
         avg = round(sum(h["composite"] for h in hist) / len(hist))
         played_san = board.san(move)
         cur_done = dict(cur)
+        profile = _sonar[sid]["profile"]
         _sonar[sid]["current"] = None  # rep consumed
+
+        # Persist: log the rep, then schedule the position for spaced review.
+        # A rep "succeeds" (graduates / never becomes a card) at composite >= 60.
+        success = composite >= 60
+        _record_rep(profile, cur_done["fen"], tier, recall, cur_done["answer"],
+                    mq, composite, cur_done["review"])
+        existing = None
+        if cur_done["card_id"]:
+            existing = _db.execute("SELECT * FROM cards WHERE id=?",
+                                   (cur_done["card_id"],)).fetchone()
+        _schedule_card(profile, cur_done["fen"], success, existing)
+        due_now = _db.execute(
+            "SELECT COUNT(*) n FROM cards WHERE profile=? AND due<=?",
+            (profile, time.time())).fetchone()["n"]
 
     return {
         "move": {**mq, "played": played_san},
@@ -1086,11 +1226,18 @@ def sonar_move(sid: str, body: SonarMove, _=Depends(require_auth)):
                       "composite": composite},
         "tier": tier, "tier_changed": tier - old_tier,
         "session_avg": avg, "reps_done": len(hist),
+        "was_review": cur_done["review"], "due": due_now,
         # Reveal the truth for prediction-error feedback.
         "cells": _visible_map(cur_done["board"], ALL_TYPES),
         "pressure": _pressure_map(cur_done["board"], human),
         "human_color": "w" if human == chess.WHITE else "b",
     }
+
+
+@app.get("/api/sonar/stats")
+def sonar_stats(profile: str = "default", _=Depends(require_auth)):
+    with _lock:
+        return _profile_stats(_clean_profile(profile))
 
 
 @app.get("/api/games/{game_id}/pgn", response_class=PlainTextResponse)

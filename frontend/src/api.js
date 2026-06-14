@@ -92,11 +92,16 @@ export function paintDrill(drillId, paint) {
 
 // Sonar: the integrated board-vision curriculum. A session runs reps, each
 // cycling one position through glimpse -> recall -> read -> play.
-export function sonarStart({ tier, level }) {
+export function sonarStart({ tier, level, profile }) {
   return fetch('/api/sonar', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ tier, level }),
+    body: JSON.stringify({ tier, level, profile }),
+  }).then(handle)
+}
+export function sonarStats(profile) {
+  return fetch(`/api/sonar/stats?profile=${encodeURIComponent(profile)}`, {
+    headers: authHeaders(),
   }).then(handle)
 }
 export function sonarNext(sid) {

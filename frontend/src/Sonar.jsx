@@ -11,7 +11,7 @@ import Board from './Board'
 import Question from './Question'
 import MoveKeypad from './MoveKeypad'
 import { STAGE, glimpseStage, stageCells } from './glimpse'
-import { sonarStart, sonarNext, sonarRecall, sonarAnswer, sonarMove } from './api'
+import { sonarStart, sonarNext, sonarRecall, sonarAnswer, sonarMove, sonarStats } from './api'
 
 const PAINT_NEXT = { y: 't', t: 'c', c: null }
 
@@ -19,6 +19,8 @@ export default function Sonar({ onError }) {
   const [phase, setPhase] = useState('intro') // intro|busy|glimpse|recall|read|play|reveal
   const [tier, setTier] = useState(2)
   const [level, setLevel] = useState(6)
+  const [profile, setProfile] = useState(() => localStorage.getItem('sonar_profile') || '')
+  const [stats, setStats] = useState(null)
 
   const [sid, setSid] = useState(null)
   const [rep, setRep] = useState(null)   // current rep payload from the server
@@ -41,6 +43,14 @@ export default function Sonar({ onError }) {
     return () => clearTimeout(t)
   }, [phase, left])
 
+  // Load this profile's progress whenever we're on the intro with a name set.
+  useEffect(() => {
+    if (phase !== 'intro' || !profile.trim()) { setStats(null); return }
+    let live = true
+    sonarStats(profile.trim()).then((s) => { if (live) setStats(s) }).catch(() => {})
+    return () => { live = false }
+  }, [phase, profile])
+
   function loadRep(r) {
     setRep(r)
     setLeft(r.reveal_seconds)
@@ -50,8 +60,10 @@ export default function Sonar({ onError }) {
   }
 
   async function begin() {
+    const name = profile.trim() || 'default'
+    localStorage.setItem('sonar_profile', name)
     setPhase('busy')
-    try { const r = await sonarStart({ tier, level }); setSid(r.session_id); loadRep(r) }
+    try { const r = await sonarStart({ tier, level, profile: name }); setSid(r.session_id); loadRep(r) }
     catch (e) { onError(e); setPhase('intro') }
   }
 
@@ -121,6 +133,10 @@ export default function Sonar({ onError }) {
           <li><strong>Play</strong> — find a strong move, still blindfold.</li>
         </ol>
         <div className="sonar-opts">
+          <label>Training as
+            <input className="sonar-name" type="text" value={profile} placeholder="your name"
+              maxLength={40} onChange={(e) => setProfile(e.target.value)} />
+          </label>
           <label>Start tier
             <select value={tier} onChange={(e) => setTier(Number(e.target.value))}>
               {[1, 2, 3, 4, 5].map((t) => <option key={t} value={t}>{t}</option>)}
@@ -132,6 +148,14 @@ export default function Sonar({ onError }) {
             <strong>{level}</strong>
           </label>
         </div>
+        {stats && stats.reps > 0 && (
+          <p className="sonar-stats">
+            {stats.reps} reps · avg {stats.avg_composite}% · {stats.avg_cp_loss} cp/move ·{' '}
+            {stats.due > 0
+              ? <strong className="sonar-due">{stats.due} review{stats.due === 1 ? '' : 's'} due</strong>
+              : 'no reviews due'}
+          </p>
+        )}
         <button className="primary" onClick={begin}>Begin session</button>
       </main>
     )
@@ -141,7 +165,9 @@ export default function Sonar({ onError }) {
     <div className="sonar-bar">
       <span>Rep {result ? result.reps_done : rep.rep}</span>
       <span>Tier {result ? result.tier : rep.tier}</span>
+      {(result ? result.was_review : rep.review) && <span className="sonar-reviewbadge">Review</span>}
       {result && <span>Avg {result.session_avg}%</span>}
+      {result && result.due > 0 && <span>{result.due} due</span>}
     </div>
   )
 
