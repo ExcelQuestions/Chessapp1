@@ -54,19 +54,20 @@ export async function login(password) {
   return token
 }
 
-export function newGame({ level, colour, thinkTime, show, mode, pressure }) {
+export function newGame({ level, colour, thinkTime, show, mode, pressure, arrows }) {
   return fetch('/api/games', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({
       level, colour, think_time: thinkTime, show, mode,
       pressure: Boolean(pressure),
+      arrows: Boolean(arrows),
     }),
   }).then(handle)
 }
 
-export function getGame(gameId, show, pressure) {
-  return fetch(`/api/games/${gameId}?show=${show}&pressure=${pressure ? 1 : 0}`, {
+export function getGame(gameId, show, pressure, arrows) {
+  return fetch(`/api/games/${gameId}?show=${show}&pressure=${pressure ? 1 : 0}&arrows=${arrows ? 1 : 0}`, {
     headers: authHeaders(),
   }).then(handle)
 }
@@ -100,16 +101,16 @@ export function pressureDetail(gameId, square) {
 // Training mode: answer the pending quiz question. `payload` carries exactly
 // one of {squares: [...]}, {yesno: bool} or {count: n} to match the question
 // format. Response is the usual game state plus {answered: {correct}}.
-export function sendAnswer(gameId, payload, show, pressure) {
-  return fetch(`/api/games/${gameId}/answer?show=${show}&pressure=${pressure ? 1 : 0}`, {
+export function sendAnswer(gameId, payload, show, pressure, arrows) {
+  return fetch(`/api/games/${gameId}/answer?show=${show}&pressure=${pressure ? 1 : 0}&arrows=${arrows ? 1 : 0}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(payload),
   }).then(handle)
 }
 
-export function sendMove(gameId, move, show, pressure) {
-  return fetch(`/api/games/${gameId}/move?show=${show}&pressure=${pressure ? 1 : 0}`, {
+export function sendMove(gameId, move, show, pressure, arrows) {
+  return fetch(`/api/games/${gameId}/move?show=${show}&pressure=${pressure ? 1 : 0}&arrows=${arrows ? 1 : 0}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify({ move }),

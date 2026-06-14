@@ -153,6 +153,7 @@ class NewGame(BaseModel):
     show: str = Field("p", max_length=6)
     mode: str = Field("play", pattern="^(play|train|exo)$")
     pressure: bool = False
+    arrows: bool = False
 
 
 class MoveIn(BaseModel):
@@ -509,7 +510,7 @@ def _check_answer(q, body):
     return body.count is not None and body.count == q["truth"]
 
 
-def _state(game_id, show="p", pressure=False):
+def _state(game_id, show="p", pressure=False, arrows=False):
     g = _games[game_id]
     board = g["board"]
     outcome = board.outcome(claim_draw=True)
@@ -553,9 +554,13 @@ def _state(game_id, show="p", pressure=False):
     # answer "which of your pieces are hanging?" at a glance.
     if pressure and not (g.get("mode") == "train" and g.get("question") and not over):
         out["pressure"] = _pressure_map(board, g["human"])
+    # Move arrows: always in exoskeleton mode; on request elsewhere. Suppressed
+    # while a training question is pending — mobility would betray the pieces.
+    want_arrows = g.get("mode") == "exo" or arrows
+    if want_arrows and not (g.get("mode") == "train" and g.get("question") and not over):
+        out["arrows"] = [] if over else _move_arrows(board, g["human"])
     if g.get("mode") == "exo":
         out["mode"] = "exo"
-        out["arrows"] = [] if over else _move_arrows(board, g["human"])
     return out
 
 
@@ -622,21 +627,21 @@ def create_game(body: NewGame, _=Depends(require_auth)):
         }
         # If the human is Black, Stockfish (White) opens.
         _do_engine_reply(_games[game_id])
-        return _state(game_id, body.show, body.pressure)
+        return _state(game_id, body.show, body.pressure, body.arrows)
 
 
 @app.get("/api/games/{game_id}")
-def get_game(game_id: str, show: str = "p", pressure: int = 0,
+def get_game(game_id: str, show: str = "p", pressure: int = 0, arrows: int = 0,
              _=Depends(require_auth)):
     with _lock:
         if game_id not in _games:
             raise HTTPException(404, "No such game.")
-        return _state(game_id, show, bool(pressure))
+        return _state(game_id, show, bool(pressure), bool(arrows))
 
 
 @app.post("/api/games/{game_id}/move")
 def make_move(game_id: str, body: MoveIn, show: str = "p", pressure: int = 0,
-              _=Depends(require_auth)):
+              arrows: int = 0, _=Depends(require_auth)):
     with _lock:
         if game_id not in _games:
             raise HTTPException(404, "No such game.")
@@ -662,12 +667,12 @@ def make_move(game_id: str, body: MoveIn, show: str = "p", pressure: int = 0,
 
         board.push(move)
         _do_engine_reply(g)
-        return _state(game_id, show, bool(pressure))
+        return _state(game_id, show, bool(pressure), bool(arrows))
 
 
 @app.post("/api/games/{game_id}/answer")
 def answer_question(game_id: str, body: AnswerIn, show: str = "p",
-                    pressure: int = 0, _=Depends(require_auth)):
+                    pressure: int = 0, arrows: int = 0, _=Depends(require_auth)):
     with _lock:
         if game_id not in _games:
             raise HTTPException(404, "No such game.")
@@ -697,7 +702,7 @@ def answer_question(game_id: str, body: AnswerIn, show: str = "p",
         g["prev_question"] = q
         g["question"] = None
 
-        return {**_state(game_id, show, bool(pressure)),
+        return {**_state(game_id, show, bool(pressure), bool(arrows)),
                 "answered": {"correct": correct, **extra}}
 
 

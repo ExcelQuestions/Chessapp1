@@ -304,6 +304,9 @@ button.primary:disabled {
   color: #c7d0dc;
 }
 .vis-pressure { font-weight: 600; color: #8fb4ff; }
+.vis-arrows { font-weight: 600; color: #8fb4ff; }
+.arrow-sub { font-size: 0.85rem; }
+.arrow-side { display: inline-flex; align-items: center; gap: 12px; margin-left: 4px; }
 
 .exo-dot {
   display: inline-block;

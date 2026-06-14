@@ -36,7 +36,9 @@ export default function App() {
   const [lastAnswer, setLastAnswer] = useState(null) // {correct, pct?} of last quiz answer
   const [pressureOn, setPressureOn] = useState(false)
   const [detail, setDetail] = useState(null) // tap-for-detail text
-  const [arrowView, setArrowView] = useState('both') // exoskeleton: y | t | both
+  const [arrowView, setArrowView] = useState('both') // arrow side filter: y | t | both
+  const [arrowsOn, setArrowsOn] = useState(false) // arrows in play/train modes
+  const [arrowScope, setArrowScope] = useState('piece') // 'piece' (on click) | 'all'
   const [error, setError] = useState(null)
   const [busy, setBusy] = useState(false)
   // Which piece types are visible. Default = classic blindfold (pawns only).
@@ -46,6 +48,7 @@ export default function App() {
 
   const show = showString(visible)
   const exo = mode === 'exo'
+  const reqArrows = exo || arrowsOn // whether to ask the server for move arrows
 
   // Centralised error handling: an expired/invalid token drops us to login.
   function fail(e) {
@@ -77,6 +80,7 @@ export default function App() {
         show: exo ? '' : show,
         mode,
         pressure: exo ? false : pressureOn,
+        arrows: reqArrows,
       }))
     } catch (e) {
       fail(e)
@@ -91,7 +95,7 @@ export default function App() {
     setVisible(nextVisible)
     if (!game) return
     try {
-      setGame(await getGame(game.game_id, showString(nextVisible) || '-', pressureOn))
+      setGame(await getGame(game.game_id, showString(nextVisible) || '-', pressureOn, arrowsOn))
     } catch (err) {
       fail(err)
     }
@@ -104,7 +108,18 @@ export default function App() {
     if (!next) setDetail(null)
     if (!game) return
     try {
-      setGame(await getGame(game.game_id, show || '-', next))
+      setGame(await getGame(game.game_id, show || '-', next, arrowsOn))
+    } catch (err) {
+      fail(err)
+    }
+  }
+
+  async function toggleArrows() {
+    const next = !arrowsOn
+    setArrowsOn(next)
+    if (!game) return
+    try {
+      setGame(await getGame(game.game_id, show || '-', pressureOn, next))
     } catch (err) {
       fail(err)
     }
@@ -119,7 +134,7 @@ export default function App() {
     setError(null)
     setBusy(true)
     try {
-      setGame(await sendMove(game.game_id, move, exo ? '-' : (show || '-'), exo ? false : pressureOn))
+      setGame(await sendMove(game.game_id, move, exo ? '-' : (show || '-'), exo ? false : pressureOn, reqArrows))
       setSelected(null)
       setTyped('')
       setLastAnswer(null)
@@ -139,7 +154,7 @@ export default function App() {
     setError(null)
     setBusy(true)
     try {
-      const res = await sendAnswer(game.game_id, payload, show || '-', pressureOn)
+      const res = await sendAnswer(game.game_id, payload, show || '-', pressureOn, reqArrows)
       setGame(res)
       setLastAnswer(res.answered)
       setPicked([])
@@ -204,6 +219,16 @@ export default function App() {
 
   const yourTurn = game && game.turn === 'human' && !game.game_over
   const colourLabel = game && (game.human_color === 'w' ? 'White' : 'Black')
+
+  // Which move arrows to draw. Exo and "all" scope show everything for the
+  // chosen side(s); "on click" shows only the selected square's piece.
+  function boardArrows() {
+    const all = (game && game.arrows) || []
+    if (exo) return all.filter((a) => arrowView === 'both' || a.side === arrowView)
+    if (!arrowsOn) return []
+    if (arrowScope === 'all') return all.filter((a) => arrowView === 'both' || a.side === arrowView)
+    return selected ? all.filter((a) => a.from === selected) : []
+  }
 
   if (!authed) return <Login onSuccess={() => setAuthed(true)} />
 
@@ -273,11 +298,50 @@ export default function App() {
           <input type="checkbox" checked={pressureOn} onChange={togglePressure} />
           Pressure
         </label>
+        <label className="vis-item vis-arrows">
+          <input type="checkbox" checked={arrowsOn} onChange={toggleArrows} />
+          Arrows
+        </label>
         <span className="vis-presets">
           <button type="button" onClick={() => setAll(true)}>All</button>
           <button type="button" onClick={() => setAll(false)}>None</button>
         </span>
       </section>}
+
+      {(mode === 'play' || mode === 'train') && arrowsOn && (
+        <section className="visibility arrow-sub">
+          <span className="vis-label">Arrows:</span>
+          <label className="vis-item">
+            <input type="radio" name="arrowscope" checked={arrowScope === 'piece'}
+              onChange={() => setArrowScope('piece')} />
+            On click (one piece)
+          </label>
+          <label className="vis-item">
+            <input type="radio" name="arrowscope" checked={arrowScope === 'all'}
+              onChange={() => setArrowScope('all')} />
+            All pieces
+          </label>
+          {arrowScope === 'all' && (
+            <span className="arrow-side">
+              <label className="vis-item">
+                <input type="radio" name="arrowview" checked={arrowView === 'y'}
+                  onChange={() => setArrowView('y')} />
+                <span className="exo-dot exo-you" /> Yours
+              </label>
+              <label className="vis-item">
+                <input type="radio" name="arrowview" checked={arrowView === 't'}
+                  onChange={() => setArrowView('t')} />
+                <span className="exo-dot exo-them" /> Opponent
+              </label>
+              <label className="vis-item">
+                <input type="radio" name="arrowview" checked={arrowView === 'both'}
+                  onChange={() => setArrowView('both')} />
+                Both
+              </label>
+            </span>
+          )}
+        </section>
+      )}
 
       {exo && (
         <section className="visibility exo-controls">
@@ -318,11 +382,7 @@ export default function App() {
                 ? Object.fromEntries(Object.entries(qpaint).map(([sq, o]) => [sq, { o, i: 2 }]))
                 : game.pressure || {}
             }
-            arrows={
-              exo
-                ? (game.arrows || []).filter((a) => arrowView === 'both' || a.side === arrowView)
-                : []
-            }
+            arrows={boardArrows()}
             onSquareClick={onSquareClick}
             disabled={busy || !yourTurn || (question && !['squares', 'paint'].includes(question.format))}
           />
