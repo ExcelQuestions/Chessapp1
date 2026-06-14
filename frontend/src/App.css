@@ -232,7 +232,10 @@ button.primary:disabled {
 .last-move code, .hint code { background: #11151c; padding: 1px 5px; border-radius: 4px; }
 
 /* ----- move keypad ----- */
-.keypad { display: flex; flex-direction: column; gap: 5px; }
+/* width:100% so it fills the column whether the parent stretches its children
+   (game panel) or aligns them to the start (Sonar); capped so the keys don't
+   blow up on wide screens. */
+.keypad { display: flex; flex-direction: column; gap: 5px; width: 100%; max-width: 360px; }
 
 .keypad-display {
   padding: 8px 12px;
@@ -448,6 +451,9 @@ button.primary:disabled {
 .sonar-verdict.v-30  { border-left-color: #ff9f5a; }
 .sonar-verdict.v-0   { border-left-color: #ff5a5a; }
 .sonar-repscore { font-size: 0.9rem; color: #c7d0dc; }
+/* Sonar lays its phases out align-items:flex-start, so interactive panels need
+   to claim full width or they collapse to their content. */
+.sonar .question { width: 100%; max-width: 360px; }
 .tier-up { color: #6fd18f; font-weight: 600; }
 .tier-down { color: #ff9f5a; font-weight: 600; }
 
